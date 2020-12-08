@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <time.h>
 
 // basic typedefs
 typedef int8_t s8;
@@ -20,8 +21,9 @@ typedef uint64_t u64;
 // defines
 #undef DEBUG_LOAD
 #undef DEBUG_FREE
-#define DEBUG_GEN 1
+#undef DEBUG_GEN
 #undef DEBUG_GEN_VERBOSE
+#undef DEBUG_PARAM
 
 // struct definitions
 typedef struct cdf_array
@@ -34,11 +36,18 @@ typedef struct cdf_array
 typedef struct ltrfile
 {
 	char magic[8];
-	uint8_t num_letters;
+	u8 num_letters;
 	cdf_array* singles;
 	cdf_array** doubles;
 	cdf_array*** triples;
 } ltrfile;
+
+typedef struct s_cfg
+{
+	int printcdf;
+	u32 generate;
+	u32 seed;
+} s_cfg;
 
 /* msrand implementation for consistency */
 #define MSRAND_MAX 0x7fff
@@ -61,7 +70,6 @@ static float nrand() { return (float)ms_rand() / MSRAND_MAX; }
 // for stock rand():
 //static float nrand() { return (float)rand() / RAND_MAX; }
 
-
 float fget_f(FILE *in)
 {
 	u32 t = 1;
@@ -73,7 +81,7 @@ float fget_f(FILE *in)
 			t |= ((u32)fgetc(in))<<24;
 		}
 	}
-	else // big endian
+	else // big endian, this isn't tested yet!
 	{
 		t = 0;
 		for (u32 i = 0; i < 4; i++)
@@ -81,8 +89,6 @@ float fget_f(FILE *in)
 			t <<= 8;
 			t |= fgetc(in);
 		}
-		fprintf(stderr,"W* We may not handle big endian stuff properly yet!\n"); fflush(stderr);
-		//exit(1);
 	}
 	return *(float *) &t;
 }
@@ -278,7 +284,7 @@ void ltr_free(ltrfile* l)
 #endif
 }
 
-void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num)
+void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg cfg)
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
 	u8 a = ' ';
@@ -302,30 +308,34 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num)
 			b = letters[j];
 			c = letters[i];
 		}
-		printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n", a, b, c,
-			p->start[i],  p->start[i]  == 0.0 ? 0.0 : p->start[i]  - s,
-			p->middle[i], p->middle[i] == 0.0 ? 0.0 : p->middle[i] - m,
-			p->end[i],    p->end[i]    == 0.0 ? 0.0 : p->end[i]    - e);
+		if ((cfg.printcdf == 2) || !((p->start[i] == 0.0) && (p->middle[i] == 0.0) && (p->end[i] == 0.0)))
+		{
+			printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n", a, b, c,
+				p->start[i],  p->start[i]  == 0.0 ? 0.0 : p->start[i]  - s,
+				p->middle[i], p->middle[i] == 0.0 ? 0.0 : p->middle[i] - m,
+				p->end[i],    p->end[i]    == 0.0 ? 0.0 : p->end[i]    - e);
+		}
 		if (p->start[i]  > 0.0) s = p->start[i];
 		if (p->middle[i] > 0.0) m = p->middle[i];
 		if (p->end[i]    > 0.0) e = p->end[i];
 	}
 }
 
-void ltr_print(ltrfile* l)
+void ltr_print(ltrfile* l, s_cfg cfg)
 {
+	if (!cfg.printcdf) return;
 	printf("Number of letters in LTR: %d\n", l->num_letters);
 	printf("Sequence | CDF(start)  P(start) | CDF(middle)  P(middle) | CDF(end)  P(end)\n");
-	cdf_print(l->singles,l->num_letters,' ',' ',0);
+	cdf_print(l->singles,l->num_letters,' ',' ',0,cfg);
 	for (u8 j = 0; j < l->num_letters; j++)
 	{
-		cdf_print(l->doubles[j],l->num_letters,' ',j,1);
+		cdf_print(l->doubles[j],l->num_letters,' ',j,1,cfg);
 	}
 	for (u8 k = 0; k < l->num_letters; k++)
 	{
 		for (u8 j = 0; j < l->num_letters; j++)
 		{
-			cdf_print(l->triples[k][j],l->num_letters,k,j,2);
+			cdf_print(l->triples[k][j],l->num_letters,k,j,2,cfg);
 		}
 	}
 }
@@ -365,7 +375,6 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 			do
 			{
 				// roll for a starting letter
-				
 				for (i = 0, rng = nrand(); i < l->num_letters; i++)
 				{
 					if (rng < l->singles->start[i])
@@ -441,7 +450,6 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 			}
 		}
 
-
 		if (k < l->num_letters) // our roll was sane?
 		{
 			name[index++] = letters[k];
@@ -473,32 +481,82 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 	name[index] = '\0'; // add a trailing null
 	// capitalize the first letter if it is a-z, leave it alone if it is - or '
 	name[0] = toupper(name[0]);
-	fprintf(stdout,"Name generated: %s\n", name); fflush(stdout);
+	printf("%s\n", name);
 }
 
 void usage()
 {
-	printf("Usage: nwn_getname file.ltr [number of names]\n");
+	printf("Usage: nwn_getname [options] file.ltr\n");
 	printf("Generate one or more names from an .ltr file\n");
-	printf("\n");
+	printf("Optional arguments:\n");
+	printf("-p\t: print the non-zero rows of the ltr CDF tables\n");
+	printf("-pp\t: print all the rows of the ltr CDF tables\n");
+	printf("-g #\t: generate # names (Default: 100)\n");
+	printf("-s #\t: use # as the seed (Default: random)\n");
+	//printf("-f\t: if the ltr file has corrupt singles tables, do not fix them\n");
+	//printf("Optional arguments:\n");
 }
 
-#define NUM_PARAMETERS 1
+#define MIN_PARAMETERS 1
 
 int main(int argc, char **argv)
 {
-	if ((argc != NUM_PARAMETERS+1) && (argc != NUM_PARAMETERS+2))
+	// defaults
+	s_cfg cfg;
+	cfg.printcdf = 0;
+	cfg.generate = 100;
+	cfg.seed = time(NULL);
+
+	if (argc < MIN_PARAMETERS+1)
 	{
 		fprintf(stderr,"E* Incorrect number of parameters!\n"); fflush(stderr);
 		usage();
 		return 1;
 	}
 
+// handle extra args
+	if (argc != MIN_PARAMETERS+1) // if we have more than one parameter
+	{
+		u32 paramidx = 1;
+		while (paramidx < (argc-2))
+		{
+			switch (*(argv[paramidx]++))
+			{
+				case 'p':
+					cfg.printcdf++;
+					break;
+				case 'g':
+					paramidx++;
+					sscanf(argv[paramidx], "%d", &cfg.generate);
+					paramidx++;
+					break;
+				case 's':
+					paramidx++;
+					sscanf(argv[paramidx], "%d", &cfg.seed);
+					paramidx++;
+					break;
+				case '\0':
+					paramidx++;
+					break;
+				case '-':
+					// skip this character.
+					break;
+				default:
+					usage();
+					exit(1);
+					break;
+			}
+		}
+	}
+#ifdef DEBUG_PARAM
+	fprintf(stderr,"D* Parameters: generate: %d, seed: %d, print cdf: %s\n", cfg.generate, cfg.seed, cfg.printcdf?((cfg.printcdf==2)?"full":"brief"):"no"); fflush(stderr);
+#endif
+
 // input file
-	FILE *in = fopen(argv[1], "rb");
+	FILE *in = fopen(argv[argc-1], "rb");
 	if (!in)
 	{
-		fprintf(stderr,"E* Unable to open input file %s!\n", argv[1]); fflush(stderr);
+		fprintf(stderr,"E* Unable to open input file %s!\n", argv[argc-1]); fflush(stderr);
 		return 1;
 	}
 
@@ -522,6 +580,9 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
+	// seed it!
+	ms_srand(cfg.seed);
+
 	// load it!
 	ltrfile* infile = ltr_load(in, len);
 	fclose(in);
@@ -530,10 +591,10 @@ int main(int argc, char **argv)
 	///TODO: ltr_fix(infile);
 
 	// print it!
-	//ltr_print(infile);
+	ltr_print(infile, cfg);
 
 	// generate some names!
-	for (u32 i = 0; i < 100; i++)
+	for (u32 i = 0; i < cfg.generate; i++)
 		ltr_generate(infile);
 
 	// free it!
