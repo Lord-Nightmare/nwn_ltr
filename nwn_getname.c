@@ -1,6 +1,6 @@
 // license:BSD-3-Clause
 // copyright-holders:Jonathan Gevaryahu
-// (C) 1998-2019 Jonathan Gevaryahu AKA Lord Nightmare
+// (C) 2020 Jonathan Gevaryahu AKA Lord Nightmare
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -16,7 +16,8 @@ typedef int64_t s64;
 typedef uint64_t u64;
 
 // defines
-#define DEBUG 1
+#define DEBUG_LOAD 1
+#define DEBUG_FREE 1
 
 // struct definitions
 
@@ -95,8 +96,8 @@ float fget_f(FILE *in)
 			t <<= 8;
 			t |= fgetc(in);
 		}
-		fprintf(stderr,"E* We don't handle big endian stuff yet! bailing out!\n"); fflush(stderr);
-		exit(1);
+		fprintf(stderr,"W* We may not handle big endian stuff properly yet!\n"); fflush(stderr);
+		//exit(1);
 	}
 	return *(float *) &t;
 }
@@ -108,7 +109,7 @@ f_array* f_alloc(u32 count)
 	f->data = (float *) malloc(count * sizeof(float));
 	if (f->data == NULL)
 	{
-		fprintf(stderr,"E* Failure to allocate memory for array of size %d, aborting!\n", f->len);
+		fprintf(stderr,"E* Failure to allocate memory for array of size %d, aborting!\n", f->len); fflush(stderr);
 		return NULL;
 	}
 	return f;
@@ -124,9 +125,16 @@ void f_free(f_array *f)
 cdf_array* cdf_alloc(u32 count)
 {
 	cdf_array *c = malloc(sizeof(cdf_array));
+	if (c == NULL)
+	{
+		fprintf(stderr,"E* Failure to allocate memory for array, aborting!\n"); fflush(stderr);
+		exit(1);
+		//return NULL;
+	}
 	c->start = f_alloc(count);
 	c->middle = f_alloc(count);
 	c->end = f_alloc(count);
+	return c;
 }
 
 void cdf_free(cdf_array *c)
@@ -137,17 +145,17 @@ void cdf_free(cdf_array *c)
 	free(c);
 }
 
-ltrfile loadltr(FILE *in, u32 len)
+ltrfile* ltr_load(FILE *in, u32 len)
 {
-	ltrfile ret;
+	ltrfile *l = malloc(sizeof(ltrfile));
 	u32 pos = 0;
 	// magic
 	{ // scope-limit
 		char* compare = "LTR V1.0 ";
 		for (u32 i = 0; i < 8; i++)
 		{
-			ret.magic[i] = fgetc(in);
-			if (ret.magic[i] != compare[i])
+			l->magic[i] = fgetc(in);
+			if (l->magic[i] != compare[i])
 			{
 				fprintf(stderr,"E* Incorrect magic number! Exiting!\n"); fflush(stderr);
 				fclose(in);
@@ -157,40 +165,165 @@ ltrfile loadltr(FILE *in, u32 len)
 		}
 	}
 	// number of letters
-	ret.num_letters = fgetc(in);
-	if ((ret.num_letters < 3) || (ret.num_letters > 28))
+	l->num_letters = fgetc(in);
+	if ((l->num_letters < 3) || (l->num_letters > 28))
 	{
-		fprintf(stderr,"E* Invalid number of letters %d! Exiting!\n", ret.num_letters); fflush(stderr);
+		fprintf(stderr,"E* Invalid number of letters %d! Exiting!\n", l->num_letters); fflush(stderr);
 		fclose(in);
 		exit(1);
 	}
 	pos++;
-#ifdef DEBUG
-	fprintf(stderr,"D* LTR header read ok, num_letters = %d\n", ret.num_letters); fflush(stderr);
+#ifdef DEBUG_LOAD
+	fprintf(stderr,"D* LTR header read ok, num_letters = %d\n", l->num_letters); fflush(stderr);
 #endif
 
-	// allocate singles table
+	// allocate and fill singles table
 	{ // scope-limit
-		ret.singles = cdf_alloc(ret.num_letters);
-		if (ret.singles == NULL)
+		l->singles = cdf_alloc(l->num_letters);
+		if (l->singles == NULL)
 		{
 			fclose(in);
 			exit(1);
 		}
-	}
-#ifdef DEBUG
-	fprintf(stderr,"D* successfully allocated the singles cdf table\n"); fflush(stderr);
+#ifdef DEBUG_LOAD
+		fprintf(stderr,"D* successfully allocated the singles cdf table\n"); fflush(stderr);
 #endif
-	// fill singles table
-	{ // scope-limit
-		for (u32 i = 0; i < ret.num_letters; i++)
+		for (u32 i = 0; i < l->num_letters; i++)
 		{
-			//ret.singles->start->data[i] = fget_f(in);
-			fprintf(stdout,"debug: seen value of %f at offset %d\n", fget_f(in), i);
+			l->singles->start->data[i] = fget_f(in); pos+=4;
+		}
+		for (u32 i = 0; i < l->num_letters; i++)
+		{
+			l->singles->middle->data[i] = fget_f(in); pos+=4;
+		}
+		for (u32 i = 0; i < l->num_letters; i++)
+		{
+			l->singles->end->data[i] = fget_f(in); pos+=4;
+		}
+#ifdef DEBUG_LOAD
+		fprintf(stderr,"D* successfully filled the singles cdf table\n"); fflush(stderr);
+#endif
+	}
+	// allocate and fill doubles tables
+	{ // scope-limit
+		l->doubles = malloc( sizeof(l->doubles) * l->num_letters ); // allocate an array of pointers
+		for (u32 j = 0; j < l->num_letters; j++)
+		{
+			l->doubles[j] = cdf_alloc(l->num_letters);
+			if (l->doubles[j] == NULL)
+			{
+				fclose(in);
+				exit(1);
+			}
+#ifdef DEBUG_LOAD
+			fprintf(stderr,"D* successfully allocated the doubles cdf table %d\n", j); fflush(stderr);
+#endif
+			for (u32 i = 0; i < l->num_letters; i++)
+			{
+				l->doubles[j]->start->data[i] = fget_f(in); pos+=4;
+			}
+			for (u32 i = 0; i < l->num_letters; i++)
+			{
+				l->doubles[j]->middle->data[i] = fget_f(in); pos+=4;
+			}
+			for (u32 i = 0; i < l->num_letters; i++)
+			{
+				l->doubles[j]->end->data[i] = fget_f(in); pos+=4;
+			}
+#ifdef DEBUG_LOAD
+			fprintf(stderr,"D* successfully filled the doubles cdf table %d\n", j); fflush(stderr);
+#endif
 		}
 	}
-	//todo: write me!
-	return ret;
+	// allocate and fill triples tables
+	{ // scope-limit
+		l->triples = malloc( sizeof(l->triples) * l->num_letters ); // allocate an array of pointers
+		for (u32 k = 0; k < l->num_letters; k++)
+		{
+			l->triples[k] = malloc( sizeof(l->triples) * l->num_letters ); // allocate an array of pointers
+			for (u32 j = 0; j < l->num_letters; j++)
+			{
+				l->triples[k][j] = cdf_alloc(l->num_letters);
+				if (l->triples[k][j] == NULL)
+				{
+					fclose(in);
+					exit(1);
+				}
+#ifdef DEBUG_LOAD
+				fprintf(stderr,"D* successfully allocated the triples cdf table %d:%d\n", k, j); fflush(stderr);
+#endif
+				for (u32 i = 0; i < l->num_letters; i++)
+				{
+					l->triples[k][j]->start->data[i] = fget_f(in); pos+=4;
+				}
+				for (u32 i = 0; i < l->num_letters; i++)
+				{
+					l->triples[k][j]->middle->data[i] = fget_f(in); pos+=4;
+				}
+				for (u32 i = 0; i < l->num_letters; i++)
+				{
+					l->triples[k][j]->end->data[i] = fget_f(in); pos+=4;
+				}
+#ifdef DEBUG_LOAD
+				fprintf(stderr,"D* successfully filled the triples cdf table %d:%d\n", k, j); fflush(stderr);
+#endif
+			}
+		}
+	}
+#ifdef DEBUG_LOAD
+	fprintf(stderr,"D* all tables loaded, expected size was %d, final size was %d\n", len, pos); fflush(stderr);
+#endif
+	return l;
+}
+
+void ltr_free(ltrfile* l)
+{
+	// first clear triples
+	for (u32 k = 0; k < l->num_letters; k++)
+	{
+		for (u32 j = 0; j < l->num_letters; j++)
+		{
+			cdf_free(l->triples[k][j]);
+		}
+		free(l->triples[k]);
+	}
+	free(l->triples);
+	// then doubles
+	for (u32 j = 0; j < l->num_letters; j++)
+	{
+		cdf_free(l->doubles[j]);
+	}
+	free(l->doubles);
+	// then singles
+	cdf_free(l->singles);
+	// then free the ltrfile itself
+	free(l);
+#ifdef DEBUG_FREE
+	fprintf(stderr,"D* everything is freed!\n"); fflush(stderr);
+#endif
+}
+
+void ltr_print(ltrfile* l)
+{
+	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
+
+    printf("Num letters: %d\n", l->num_letters);
+    printf("Sequence | CDF(start)  P(start) | CDF(middle)  P(middle) | CDF(end)  P(end)\n");
+
+	//singles
+	float s = 0.0, m = 0.0, e = 0.0;
+	/*for (u8 i = 0; i < l->num_letters; i++) {
+        struct cdf *p = &ltr->data.singles;
+        printf("%c        |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n", letters[i],
+                p->start[i],  p->start[i]  == 0.0 ? 0.0 : p->start[i]  - s,
+                p->middle[i], p->middle[i] == 0.0 ? 0.0 : p->middle[i] - m,
+                p->end[i],    p->end[i]    == 0.0 ? 0.0 : p->end[i]    - e);
+
+        if (p->start[i]  > 0.0) s = p->start[i];
+        if (p->middle[i] > 0.0) m = p->middle[i];
+        if (p->end[i]    > 0.0) e = p->end[i];*/
+    }
+
 }
 
 void usage()
@@ -239,9 +372,15 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	// encapsulation woo
-	ltrfile infile = loadltr(in, len);
+	// load it!
+	ltrfile* infile = ltr_load(in, len);
+	fclose(in);
 
+	// print it!
+	ltr_print(infile);
+
+	// free it!
+	ltr_free(infile);
 /*
 
 
