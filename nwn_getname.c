@@ -488,7 +488,7 @@ void usage()
 {
 	printf("Usage: nwn_getname [options] file.ltr\n");
 	printf("Generate one or more names from an .ltr file\n");
-	printf("Optional arguments:\n");
+	printf("Optional parameters:\n");
 	printf("-p\t: print the non-zero rows of the ltr CDF tables\n");
 	printf("-pp\t: print all the rows of the ltr CDF tables\n");
 	printf("-g #\t: generate # names (Default: 100)\n");
@@ -513,43 +513,40 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-// handle extra args
-	if (argc != MIN_PARAMETERS+1) // if we have more than one parameter
+// handle optional parameters
+	u32 paramidx = 1;
+	while (paramidx < (argc-1))
 	{
-		u32 paramidx = 1;
-		while (paramidx < (argc-1))
+		switch (*(argv[paramidx]++))
 		{
-			switch (*(argv[paramidx]++))
-			{
-				case 'p':
-					cfg.printcdf++;
-					if (cfg.printcdf > 2) { fprintf(stderr,"E* Too much verbosity specified for print cdf parameter!\n"); fflush(stderr); usage(); exit(1); }
-					break;
-				case 'g':
-					paramidx++;
-					if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for generate number parameter!\n"); fflush(stderr); usage(); exit(1); }
-					if (!sscanf(argv[paramidx], "%d", &cfg.generate)) { fprintf(stderr,"E* unable to parse argument for generate number parameter!\n"); fflush(stderr); usage(); exit(1); }
-					paramidx++;
-					break;
-				case 's':
-					paramidx++;
-					if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for seed parameter!\n"); fflush(stderr); usage(); exit(1); }
-					if (!sscanf(argv[paramidx], "%d", &cfg.seed)) { fprintf(stderr,"E* unable to parse argument for seed parameter!\n"); fflush(stderr); usage(); exit(1); }
-					paramidx++;
-					break;
-				case '\0':
-					paramidx++;
-					break;
-				case '-':
-					// skip this character.
-					break;
-				default:
-					usage();
-					exit(1);
-					break;
-			}
+			case 'p':
+				cfg.printcdf++;
+				if (cfg.printcdf > 2) { fprintf(stderr,"E* Too much verbosity specified for print cdf parameter!\n"); fflush(stderr); usage(); exit(1); }
+				break;
+			case 'g':
+				paramidx++;
+				if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for -g parameter!\n"); fflush(stderr); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &cfg.generate)) { fprintf(stderr,"E* unable to parse argument for -g parameter!\n"); fflush(stderr); usage(); exit(1); }
+				paramidx++;
+				break;
+			case 's':
+				paramidx++;
+				if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for -s parameter!\n"); fflush(stderr); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &cfg.seed)) { fprintf(stderr,"E* unable to parse argument for -s parameter!\n"); fflush(stderr); usage(); exit(1); }
+				paramidx++;
+				break;
+			case '\0':
+				paramidx++;
+				break;
+			case '-':
+				// skip this character.
+				break;
+			default:
+				{ fprintf(stderr,"E* Invalid option!\n"); fflush(stderr); usage(); exit(1); }
+				break;
 		}
 	}
+
 #ifdef DEBUG_PARAM
 	fprintf(stderr,"D* Parameters: generate: %d, seed: %d, print cdf: %s\n", cfg.generate, cfg.seed, cfg.printcdf?((cfg.printcdf==2)?"full":"brief"):"no"); fflush(stderr);
 #endif
