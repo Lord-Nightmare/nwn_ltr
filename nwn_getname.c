@@ -568,13 +568,13 @@ int main(int argc, char **argv)
 #define MAXFILESIZE (8+1+(sizeof(float)*((28*3)+(28*28*3)+(28*28*28*3))))
 	if (len < MINFILESIZE)
 	{
-		fprintf(stderr,"E* input file size of %d is too small!\n", len);
+		fprintf(stderr,"E* input file size of %d is too small!\n", len); fflush(stderr);
 		fclose(in);
 		exit(1);
 	}
 	else if (len > MAXFILESIZE)
 	{
-		fprintf(stderr,"E* input file size of %d is too large!\n", len);
+		fprintf(stderr,"E* input file size of %d is too large!\n", len); fflush(stderr);
 		fclose(in);
 		exit(1);
 	}
