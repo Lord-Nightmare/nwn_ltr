@@ -494,7 +494,6 @@ void usage()
 	printf("-g #\t: generate # names (Default: 100)\n");
 	printf("-s #\t: use # as the seed (Default: random)\n");
 	//printf("-f\t: if the ltr file has corrupt singles tables, do not fix them\n");
-	//printf("Optional arguments:\n");
 }
 
 #define MIN_PARAMETERS 1
@@ -518,21 +517,24 @@ int main(int argc, char **argv)
 	if (argc != MIN_PARAMETERS+1) // if we have more than one parameter
 	{
 		u32 paramidx = 1;
-		while (paramidx < (argc-2))
+		while (paramidx < (argc-1))
 		{
 			switch (*(argv[paramidx]++))
 			{
 				case 'p':
 					cfg.printcdf++;
+					if (cfg.printcdf > 2) { fprintf(stderr,"E* Too much verbosity specified for print cdf parameter!\n"); fflush(stderr); usage(); exit(1); }
 					break;
 				case 'g':
 					paramidx++;
-					sscanf(argv[paramidx], "%d", &cfg.generate);
+					if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for generate number parameter!\n"); fflush(stderr); usage(); exit(1); }
+					if (!sscanf(argv[paramidx], "%d", &cfg.generate)) { fprintf(stderr,"E* unable to parse argument for generate number parameter!\n"); fflush(stderr); usage(); exit(1); }
 					paramidx++;
 					break;
 				case 's':
 					paramidx++;
-					sscanf(argv[paramidx], "%d", &cfg.seed);
+					if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for seed parameter!\n"); fflush(stderr); usage(); exit(1); }
+					if (!sscanf(argv[paramidx], "%d", &cfg.seed)) { fprintf(stderr,"E* unable to parse argument for seed parameter!\n"); fflush(stderr); usage(); exit(1); }
 					paramidx++;
 					break;
 				case '\0':
