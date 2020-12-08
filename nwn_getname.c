@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <ctype.h>
 
 // basic typedefs
 typedef int8_t s8;
@@ -16,56 +18,17 @@ typedef int64_t s64;
 typedef uint64_t u64;
 
 // defines
-#define DEBUG_LOAD 1
-#define DEBUG_FREE 1
+#undef DEBUG_LOAD
+#undef DEBUG_FREE
+#define DEBUG_GEN 1
+#undef DEBUG_GEN_VERBOSE
 
 // struct definitions
-
-/*
-typedef enum {
-	ZERO = 0,
-	ONE,
-	TWO
-} number_type_t;
-*/
-/*
-// biquad filter params used to generate the filter constants a1/2, b0/1/2
-typedef struct biquad_params
-{
-	biquad_type_t type;
-	double fc;
-	double q;
-	double gain;
-	uint32_t sr;
-} biquad_params;
-
-// generic biquad filter
-typedef struct biquad_filter
-{
-	biquad_params params;
-	double w0;
-	double w1;
-	double w2;
-	// double a0; // only used if gain is done on the input side, which requires an extra multiply, so we're not doing it here.
-	double a1;
-	double a2;
-	double b0;
-	double b1;
-	double b2;
-} biquad_filter;
-*/
-
-typedef struct f_array
-{
-	uint32_t len;
-	float* data;
-} f_array;
-
 typedef struct cdf_array
 {
-	f_array* start;
-	f_array* middle;
-	f_array* end;
+	float* start;
+	float* middle;
+	float* end;
 } cdf_array;
 
 typedef struct ltrfile
@@ -76,6 +39,28 @@ typedef struct ltrfile
 	cdf_array** doubles;
 	cdf_array*** triples;
 } ltrfile;
+
+/* msrand implementation for consistency */
+#define MSRAND_MAX 0x7fff
+static u32 state = 1;
+
+u32 ms_rand()
+{
+	state = ((state*214013) + 2531011) % (1<<31);
+	return (state >> 16)&0x7fff;
+}
+
+void ms_srand(u32 seed)
+{
+	state = seed;
+}
+
+static float nrand() { return (float)ms_rand() / MSRAND_MAX; }
+/* end msrand */
+
+// for stock rand():
+//static float nrand() { return (float)rand() / RAND_MAX; }
+
 
 float fget_f(FILE *in)
 {
@@ -102,24 +87,15 @@ float fget_f(FILE *in)
 	return *(float *) &t;
 }
 
-f_array* f_alloc(u32 count)
+float* f_alloc(u32 count)
 {
-	f_array *f = malloc(sizeof(f_array));
-	f->len = count;
-	f->data = (float *) malloc(count * sizeof(float));
-	if (f->data == NULL)
+	float* f = malloc(count * sizeof(float));
+	if (f == NULL)
 	{
-		fprintf(stderr,"E* Failure to allocate memory for array of size %d, aborting!\n", f->len); fflush(stderr);
+		fprintf(stderr,"E* Failure to allocate memory for array of size %d, aborting!\n", count); fflush(stderr);
 		return NULL;
 	}
 	return f;
-}
-
-void f_free(f_array *f)
-{
-	free(f->data);
-	f->len = 0;
-	free(f);
 }
 
 cdf_array* cdf_alloc(u32 count)
@@ -129,7 +105,6 @@ cdf_array* cdf_alloc(u32 count)
 	{
 		fprintf(stderr,"E* Failure to allocate memory for array, aborting!\n"); fflush(stderr);
 		exit(1);
-		//return NULL;
 	}
 	c->start = f_alloc(count);
 	c->middle = f_alloc(count);
@@ -139,9 +114,9 @@ cdf_array* cdf_alloc(u32 count)
 
 void cdf_free(cdf_array *c)
 {
-	f_free(c->end);
-	f_free(c->middle);
-	f_free(c->start);
+	free(c->end);
+	free(c->middle);
+	free(c->start);
 	free(c);
 }
 
@@ -166,7 +141,7 @@ ltrfile* ltr_load(FILE *in, u32 len)
 	}
 	// number of letters
 	l->num_letters = fgetc(in);
-	if ((l->num_letters < 3) || (l->num_letters > 28))
+	if ((l->num_letters < 1) || (l->num_letters > 28))
 	{
 		fprintf(stderr,"E* Invalid number of letters %d! Exiting!\n", l->num_letters); fflush(stderr);
 		fclose(in);
@@ -190,15 +165,15 @@ ltrfile* ltr_load(FILE *in, u32 len)
 #endif
 		for (u32 i = 0; i < l->num_letters; i++)
 		{
-			l->singles->start->data[i] = fget_f(in); pos+=4;
+			l->singles->start[i] = fget_f(in); pos+=4;
 		}
 		for (u32 i = 0; i < l->num_letters; i++)
 		{
-			l->singles->middle->data[i] = fget_f(in); pos+=4;
+			l->singles->middle[i] = fget_f(in); pos+=4;
 		}
 		for (u32 i = 0; i < l->num_letters; i++)
 		{
-			l->singles->end->data[i] = fget_f(in); pos+=4;
+			l->singles->end[i] = fget_f(in); pos+=4;
 		}
 #ifdef DEBUG_LOAD
 		fprintf(stderr,"D* successfully filled the singles cdf table\n"); fflush(stderr);
@@ -220,15 +195,15 @@ ltrfile* ltr_load(FILE *in, u32 len)
 #endif
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
-				l->doubles[j]->start->data[i] = fget_f(in); pos+=4;
+				l->doubles[j]->start[i] = fget_f(in); pos+=4;
 			}
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
-				l->doubles[j]->middle->data[i] = fget_f(in); pos+=4;
+				l->doubles[j]->middle[i] = fget_f(in); pos+=4;
 			}
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
-				l->doubles[j]->end->data[i] = fget_f(in); pos+=4;
+				l->doubles[j]->end[i] = fget_f(in); pos+=4;
 			}
 #ifdef DEBUG_LOAD
 			fprintf(stderr,"D* successfully filled the doubles cdf table %d\n", j); fflush(stderr);
@@ -254,15 +229,15 @@ ltrfile* ltr_load(FILE *in, u32 len)
 #endif
 				for (u32 i = 0; i < l->num_letters; i++)
 				{
-					l->triples[k][j]->start->data[i] = fget_f(in); pos+=4;
+					l->triples[k][j]->start[i] = fget_f(in); pos+=4;
 				}
 				for (u32 i = 0; i < l->num_letters; i++)
 				{
-					l->triples[k][j]->middle->data[i] = fget_f(in); pos+=4;
+					l->triples[k][j]->middle[i] = fget_f(in); pos+=4;
 				}
 				for (u32 i = 0; i < l->num_letters; i++)
 				{
-					l->triples[k][j]->end->data[i] = fget_f(in); pos+=4;
+					l->triples[k][j]->end[i] = fget_f(in); pos+=4;
 				}
 #ifdef DEBUG_LOAD
 				fprintf(stderr,"D* successfully filled the triples cdf table %d:%d\n", k, j); fflush(stderr);
@@ -303,27 +278,202 @@ void ltr_free(ltrfile* l)
 #endif
 }
 
-void ltr_print(ltrfile* l)
+void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num)
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
-
-    printf("Num letters: %d\n", l->num_letters);
-    printf("Sequence | CDF(start)  P(start) | CDF(middle)  P(middle) | CDF(end)  P(end)\n");
-
-	//singles
+	u8 a = ' ';
+	u8 b = ' ';
+	u8 c = ' ';
 	float s = 0.0, m = 0.0, e = 0.0;
-	/*for (u8 i = 0; i < l->num_letters; i++) {
-        struct cdf *p = &ltr->data.singles;
-        printf("%c        |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n", letters[i],
-                p->start[i],  p->start[i]  == 0.0 ? 0.0 : p->start[i]  - s,
-                p->middle[i], p->middle[i] == 0.0 ? 0.0 : p->middle[i] - m,
-                p->end[i],    p->end[i]    == 0.0 ? 0.0 : p->end[i]    - e);
+	for (u8 i = 0; i < num_letters; i++) {
+		// formatting
+		if (num == 0)
+		{
+			a = letters[i];
+		}
+		else if (num == 1)
+		{
+			a = letters[j];
+			b = letters[i];
+		}
+		else // num == 2
+		{
+			a = letters[k];
+			b = letters[j];
+			c = letters[i];
+		}
+		printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n", a, b, c,
+			p->start[i],  p->start[i]  == 0.0 ? 0.0 : p->start[i]  - s,
+			p->middle[i], p->middle[i] == 0.0 ? 0.0 : p->middle[i] - m,
+			p->end[i],    p->end[i]    == 0.0 ? 0.0 : p->end[i]    - e);
+		if (p->start[i]  > 0.0) s = p->start[i];
+		if (p->middle[i] > 0.0) m = p->middle[i];
+		if (p->end[i]    > 0.0) e = p->end[i];
+	}
+}
 
-        if (p->start[i]  > 0.0) s = p->start[i];
-        if (p->middle[i] > 0.0) m = p->middle[i];
-        if (p->end[i]    > 0.0) e = p->end[i];*/
-    }
+void ltr_print(ltrfile* l)
+{
+	printf("Number of letters in LTR: %d\n", l->num_letters);
+	printf("Sequence | CDF(start)  P(start) | CDF(middle)  P(middle) | CDF(end)  P(end)\n");
+	cdf_print(l->singles,l->num_letters,' ',' ',0);
+	for (u8 j = 0; j < l->num_letters; j++)
+	{
+		cdf_print(l->doubles[j],l->num_letters,' ',j,1);
+	}
+	for (u8 k = 0; k < l->num_letters; k++)
+	{
+		for (u8 j = 0; j < l->num_letters; j++)
+		{
+			cdf_print(l->triples[k][j],l->num_letters,k,j,2);
+		}
+	}
+}
 
+u8 l2offset(u8 in)
+{
+	u8 ret = in - 'a';
+	if (in == '\'') return 26;
+	if (in == '-') return 27;
+	return ret;
+}
+
+void ltr_generate(ltrfile* l) // generate exactly one name.
+{
+	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
+	char name[64] = {0};
+	u32 index = 0;
+	bool done = false;
+	bool begin = true;
+	float rng = 0.0;
+	u8 i, j, k;
+	s32 failcnt = 0;
+#ifdef DEBUG_GEN_VERBOSE
+	fprintf(stdout,"D* generating name...\n"); fflush(stdout);
+#endif
+	while (!done) // if we're not done yet
+	{
+#ifdef DEBUG_GEN
+	if (index != 0) fprintf(stdout,"D* Current name state is \"%s\"\n", name); fflush(stdout);
+#endif
+		// generate the first 3 letters
+		if (begin)
+		{
+			// initialze some variables here
+			failcnt = 0;
+			index = 0;
+			do
+			{
+				// roll for a starting letter
+				
+				for (i = 0, rng = nrand(); i < l->num_letters; i++)
+				{
+					if (rng < l->singles->start[i])
+						break;
+				}
+
+				if (i >= l->num_letters) // sanity check
+					continue;
+
+				// roll for the second letter
+				for (j = 0, rng = nrand(); j < l->num_letters; j++)
+				{
+					if (rng < l->doubles[i]->start[j])
+						break;
+				}
+
+				if (j >= l->num_letters) // sanity check
+					continue;
+
+				// roll for the third letter
+				for (k = 0, rng = nrand(); k < l->num_letters; k++)
+				{
+					if (rng < l->triples[i][j]->start[k])
+						break;
+				}
+
+			} while ((i >= l->num_letters) || (j >= l->num_letters) || (k >= l->num_letters)); // sanity check and loop condition in one
+
+			// we did it! shove these 3 letters into a string
+			name[index++] = letters[i];
+			name[index++] = letters[j];
+			name[index++] = letters[k];
+#ifdef DEBUG_GEN
+			fprintf(stdout,"D* generated 3 first characters %c%c%c\n", letters[i], letters[j], letters[k]); fflush(stdout);
+#endif
+			begin = false;
+		}
+		// at this point index is at least 3.
+
+		// make sure k was sane before shifting stuff over
+		if (k < l->num_letters)
+		{
+			i = j;
+			j = k;
+		}
+
+		// roll for another letter for k but don't use it yet
+		rng = nrand();
+
+		// roll to see whether the name ends here; names can't be longer than 12+1 letters and should be biased toward shorter names
+		if ( (ms_rand() % 12) <= index ) // did our name end?
+		{
+			for (k = 0; k < l->num_letters; k++)
+			{
+				if (rng < l->triples[i][j]->end[k]) // use the previous letter roll to find an ending triple
+				{
+					done = true; // no more letters needed, we just use the ending triple we found directly.
+					// note there may be an original bug here, if k from this roll wasn't sane, we end abruptly?
+#ifdef DEBUG_GEN
+			fprintf(stdout,"D* rolled to end the name after the next letter\n"); fflush(stdout);
+#endif
+					break;
+				}
+			}
+		}
+
+		if (!done) // if we're not done yet, we still need more letters.
+		{
+			for (k = 0; k < l->num_letters; k++)
+			{
+				if (rng < l->triples[i][j]->middle[k]) // use the previous letter roll to find an middle triple
+					break;
+			}
+		}
+
+
+		if (k < l->num_letters) // our roll was sane?
+		{
+			name[index++] = letters[k];
+#ifdef DEBUG_GEN_VERBOSE
+			fprintf(stdout,"D* generated another character %c\n", letters[k]); fflush(stdout);
+#endif
+		}
+		else if ((index > 3) && (failcnt < 100)) // no, it wasn't. we may be stuck in an impossible situation, so back up and try again
+		{
+#ifdef DEBUG_GEN_VERBOSE
+			fprintf(stdout,"D* backing up 1 character after failing a roll\n"); fflush(stdout);
+#endif
+			// regenerate the old values for i and j
+			j = l2offset(name[index-2]);
+			i = l2offset(name[index-3]);
+			name[index-1] = '\0'; // DEBUG: nuke the character at index-1
+			index--;
+			failcnt++;
+		}
+		else // we're definitely stuck in a bad way. just start over.
+		{
+#ifdef DEBUG_GEN
+			fprintf(stdout,"D* giving up and starting over\n"); fflush(stdout);
+#endif
+			index = 0; // DEBUG: set index to 0
+			begin = true;
+		}
+	}
+	name[index] = '\0'; // add a trailing null
+	// capitalize the first letter if it is a-z, leave it alone if it is - or '
+	name[0] = toupper(name[0]);
+	fprintf(stdout,"Name generated: %s\n", name); fflush(stdout);
 }
 
 void usage()
@@ -357,7 +507,7 @@ int main(int argc, char **argv)
 	rewind(in); //fseek(in, 0, SEEK_SET);
 
 	// simple filesize sanity checks
-#define MINFILESIZE (8+1+(sizeof(float)*((3*3)+(3*3*3)+(3*3*3*3))))
+#define MINFILESIZE (8+1+(sizeof(float)*((1*3)+(1*1*3)+(1*1*1*3))))
 #define MAXFILESIZE (8+1+(sizeof(float)*((28*3)+(28*28*3)+(28*28*28*3))))
 	if (len < MINFILESIZE)
 	{
@@ -376,46 +526,19 @@ int main(int argc, char **argv)
 	ltrfile* infile = ltr_load(in, len);
 	fclose(in);
 
+	// fix it!
+	///TODO: ltr_fix(infile);
+
 	// print it!
-	ltr_print(infile);
+	//ltr_print(infile);
+
+	// generate some names!
+	for (u32 i = 0; i < 100; i++)
+		ltr_generate(infile);
 
 	// free it!
 	ltr_free(infile);
-/*
 
-
-	{ // scope limiter for temp
-		uint32_t temp = fread(dataArray, sizeof(uint8_t), len, in);
-		fclose(in);
-		if (temp != len)
-		{
-			fprintf(stderr,"E* Error reading in %d elements, only read in %d, aborting!\n", len, temp);
-			free(dataArray);
-			dataArray = NULL;
-			return 1;
-		}
-		fprintf(stderr,"D* Successfully read in %d bytes\n", temp);
-	}
-
-// prepare output file
-	FILE *out = fopen(argv[2], "wb");
-	if (!out)
-	{
-		fprintf(stderr,"E* Unable to open output file %s!\n", argv[2]);
-		free(dataArray);
-		dataArray = NULL;
-		return 1;
-	}
-	fflush(stderr);
-*/
-
-
-
-// actual program goes here
-
-//	fclose(out); 
-	//free(dataArray);
-	//dataArray = NULL;
 	return 0;
 }
 
