@@ -19,11 +19,13 @@ typedef int64_t s64;
 typedef uint64_t u64;
 
 // defines
+#undef DEBUG_PARAM
 #undef DEBUG_LOAD
-#undef DEBUG_FREE
+#undef DEBUG_FIX
+#undef DEBUG_FIX_VERBOSE
 #undef DEBUG_GEN
 #undef DEBUG_GEN_VERBOSE
-#undef DEBUG_PARAM
+#undef DEBUG_FREE
 
 // struct definitions
 typedef struct cdf_array
@@ -47,6 +49,7 @@ typedef struct s_cfg
 	int printcdf;
 	u32 generate;
 	u32 seed;
+	bool fix;
 } s_cfg;
 
 /* msrand implementation for consistency */
@@ -284,6 +287,81 @@ void ltr_free(ltrfile* l)
 #endif
 }
 
+void f_array_fix(float* t, u8 num_letters)
+{
+	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
+	float acc = 0.0;
+	float prev = 0.0;
+	float correction = 0.0;
+	float uncorrected = 0.0;
+	for (u8 i = 0; i < num_letters; i++)
+	{
+		uncorrected = t[i];
+		if (t[i] != 0.0)
+		{
+			if ((i > 0) && (prev == 0.0))
+				correction = acc;
+			acc = t[i] + correction;
+			t[i] = acc;
+		}
+#ifdef DEBUG_FIX_VERBOSE
+		fprintf(stderr,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, t[i], acc, correction); fflush(stderr);
+#endif
+		prev = uncorrected;
+	}
+#ifdef DEBUG_FIX_VERBOSE
+	if ((acc < 0.9999) || (acc > 1.0001))
+		fprintf(stderr,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", acc);
+#endif
+}
+
+void ltr_fix(ltrfile* l) {
+	// There was a bug in the original code Bioware used to create .ltr files
+	// which caused the single.middle and single.end tables to have their CDF
+	// values corrupted for all entries past any which have a probability of
+	// zero.
+	// Fortunately, this can be corrected for in post, which we do here.
+
+	// If the final nonzero value in the table is not 'exactly' 1.0, then they
+	// are corrupt.
+	// Note that likely due to precision loss sometime during generation by
+	// Bioware's utility, the results, even after correction, may not exactly
+	// accumulate to 1.000000f, so we give a small bit of leeway.
+	u32 iscorrupt = 3;
+	for (u32 i = 0; i < l->num_letters; i++)
+	{
+		if ((l->singles->middle[i] >= 0.9999) && (l->singles->middle[i] <= 1.0001))
+		{
+			iscorrupt &= ~2; // the middle table is not corrupt
+		}
+		if ((l->singles->end[i] >= 0.9999) && (l->singles->end[i] <= 1.0001))
+		{
+			iscorrupt &= ~1; // the end table is not corrupt
+		}
+	}
+	if (iscorrupt & 2)
+	{
+#ifdef DEBUG_FIX
+		fprintf(stderr,"Correcting errors in singles.middle probability table...\n"); fflush(stderr);
+#endif
+		f_array_fix(l->singles->middle, l->num_letters);
+	}
+	if (iscorrupt & 1)
+	{
+#ifdef DEBUG_FIX
+		fprintf(stderr,"Correcting errors in singles.end probability table...\n");
+#endif
+		f_array_fix(l->singles->end, l->num_letters);
+	}
+	if (iscorrupt != 0)
+	{
+#ifdef DEBUG_FIX
+		fprintf(stderr,"Corrections completed.\n");	fflush(stderr);
+#endif
+	}
+}
+
+
 void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg cfg)
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
@@ -493,7 +571,7 @@ void usage()
 	printf("-pp\t: print all the rows of the ltr CDF tables\n");
 	printf("-g #\t: generate # names (Default: 100)\n");
 	printf("-s #\t: use # as the seed (Default: random)\n");
-	//printf("-f\t: if the ltr file has corrupt singles tables, do not fix them\n");
+	printf("-f\t: if the ltr file has corrupt singles tables, do not fix them\n");
 }
 
 #define MIN_PARAMETERS 1
@@ -502,9 +580,12 @@ int main(int argc, char **argv)
 {
 	// defaults
 	s_cfg cfg;
-	cfg.printcdf = 0;
-	cfg.generate = 100;
-	cfg.seed = time(NULL);
+	{ // scope-limit
+		cfg.printcdf = 0;
+		cfg.generate = 100;
+		cfg.seed = time(NULL);
+		cfg.fix = true;
+	}
 
 	if (argc < MIN_PARAMETERS+1)
 	{
@@ -534,6 +615,9 @@ int main(int argc, char **argv)
 				if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for -s parameter!\n"); fflush(stderr); usage(); exit(1); }
 				if (!sscanf(argv[paramidx], "%d", &cfg.seed)) { fprintf(stderr,"E* unable to parse argument for -s parameter!\n"); fflush(stderr); usage(); exit(1); }
 				paramidx++;
+				break;
+			case 'f':
+				cfg.fix = false;
 				break;
 			case '\0':
 				paramidx++;
@@ -587,7 +671,8 @@ int main(int argc, char **argv)
 	fclose(in);
 
 	// fix it!
-	///TODO: ltr_fix(infile);
+	if (cfg.fix)
+		ltr_fix(infile);
 
 	// print it!
 	ltr_print(infile, cfg);
