@@ -34,11 +34,18 @@ typedef uint64_t u64;
 	do { if (v) { fprintf(stderr, __VA_ARGS__); fflush(stderr); } } while (0)
 
 // struct definitions
+typedef struct f_array
+{
+	u32 count;
+	float cdf_data;
+	float pdf_data;
+} f_array;
+
 typedef struct cdf_array
 {
-	float* start;
-	float* middle;
-	float* end;
+	f_array* start;
+	f_array* middle;
+	f_array* end;
 } cdf_array;
 
 typedef struct ltrfile
@@ -103,9 +110,9 @@ float fget_f(FILE *in)
 	return *(float *) &t;
 }
 
-float* f_alloc(u32 count)
+f_array* f_alloc(u32 count)
 {
-	float* f = malloc(count * sizeof(float));
+	f_array* f = malloc(count * sizeof(f_array));
 	if (f == NULL)
 	{
 		eprintf(V_ERR,"E* Failure to allocate memory for array of size %d, aborting!\n", count);
@@ -177,15 +184,15 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 		eprintf(V_LOAD2,"D* successfully allocated the singles cdf table\n");
 		for (u32 i = 0; i < l->num_letters; i++)
 		{
-			l->singles->start[i] = fget_f(in); pos+=4;
+			l->singles->start[i].cdf_data = fget_f(in); pos+=4;
 		}
 		for (u32 i = 0; i < l->num_letters; i++)
 		{
-			l->singles->middle[i] = fget_f(in); pos+=4;
+			l->singles->middle[i].cdf_data = fget_f(in); pos+=4;
 		}
 		for (u32 i = 0; i < l->num_letters; i++)
 		{
-			l->singles->end[i] = fget_f(in); pos+=4;
+			l->singles->end[i].cdf_data = fget_f(in); pos+=4;
 		}
 		eprintf(V_LOAD2,"D* successfully filled the singles cdf table\n");
 	}
@@ -203,15 +210,15 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 			eprintf(V_LOAD2,"D* successfully allocated the doubles cdf table %d\n", j);
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
-				l->doubles[j]->start[i] = fget_f(in); pos+=4;
+				l->doubles[j]->start[i].cdf_data = fget_f(in); pos+=4;
 			}
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
-				l->doubles[j]->middle[i] = fget_f(in); pos+=4;
+				l->doubles[j]->middle[i].cdf_data = fget_f(in); pos+=4;
 			}
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
-				l->doubles[j]->end[i] = fget_f(in); pos+=4;
+				l->doubles[j]->end[i].cdf_data = fget_f(in); pos+=4;
 			}
 			eprintf(V_LOAD2,"D* successfully filled the doubles cdf table %d\n", j);
 		}
@@ -233,15 +240,15 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 				eprintf(V_LOAD2,"D* successfully allocated the triples cdf table %d:%d\n", k, j);
 				for (u32 i = 0; i < l->num_letters; i++)
 				{
-					l->triples[k][j]->start[i] = fget_f(in); pos+=4;
+					l->triples[k][j]->start[i].cdf_data = fget_f(in); pos+=4;
 				}
 				for (u32 i = 0; i < l->num_letters; i++)
 				{
-					l->triples[k][j]->middle[i] = fget_f(in); pos+=4;
+					l->triples[k][j]->middle[i].cdf_data = fget_f(in); pos+=4;
 				}
 				for (u32 i = 0; i < l->num_letters; i++)
 				{
-					l->triples[k][j]->end[i] = fget_f(in); pos+=4;
+					l->triples[k][j]->end[i].cdf_data = fget_f(in); pos+=4;
 				}
 				eprintf(V_LOAD2,"D* successfully filled the triples cdf table %d:%d\n", k, j);
 			}
@@ -276,7 +283,7 @@ void ltr_free(ltrfile* l, s_cfg c)
 	eprintf(V_FREE,"D* everything is freed!\n");
 }
 
-void f_array_fix(float* t, u8 num_letters, s_cfg c)
+void f_array_fix(f_array* t, u8 num_letters, s_cfg c)
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
 	float acc = 0.0;
@@ -285,15 +292,15 @@ void f_array_fix(float* t, u8 num_letters, s_cfg c)
 	float uncorrected = 0.0;
 	for (u8 i = 0; i < num_letters; i++)
 	{
-		uncorrected = t[i];
-		if (t[i] != 0.0)
+		uncorrected = t[i].cdf_data;
+		if (t[i].cdf_data != 0.0)
 		{
 			if ((i > 0) && (prev == 0.0))
 				correction = acc;
-			acc = t[i] + correction;
-			t[i] = acc;
+			acc = t[i].cdf_data + correction;
+			t[i].cdf_data = acc;
 		}
-		eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, t[i], acc, correction);
+		eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, t[i].cdf_data, acc, correction);
 		prev = uncorrected;
 	}
 	if ((acc < 0.9999) || (acc > 1.0001))
@@ -315,11 +322,11 @@ void ltr_fix(ltrfile* l, s_cfg c) {
 	u32 iscorrupt = 3;
 	for (u32 i = 0; i < l->num_letters; i++)
 	{
-		if ((l->singles->middle[i] >= 0.9999) && (l->singles->middle[i] <= 1.0001))
+		if ((l->singles->middle[i].cdf_data >= 0.9999) && (l->singles->middle[i].cdf_data <= 1.0001))
 		{
 			iscorrupt &= ~2; // the middle table is not corrupt
 		}
-		if ((l->singles->end[i] >= 0.9999) && (l->singles->end[i] <= 1.0001))
+		if ((l->singles->end[i].cdf_data >= 0.9999) && (l->singles->end[i].cdf_data <= 1.0001))
 		{
 			iscorrupt &= ~1; // the end table is not corrupt
 		}
@@ -363,16 +370,16 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg cfg)
 			b = letters[j];
 			c = letters[i];
 		}
-		if ((cfg.printcdf == 2) || !((p->start[i] == 0.0) && (p->middle[i] == 0.0) && (p->end[i] == 0.0)))
+		if ((cfg.printcdf == 2) || !((p->start[i].cdf_data == 0.0) && (p->middle[i].cdf_data == 0.0) && (p->end[i].cdf_data == 0.0)))
 		{
 			printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n", a, b, c,
-				p->start[i],  p->start[i]  == 0.0 ? 0.0 : p->start[i]  - s,
-				p->middle[i], p->middle[i] == 0.0 ? 0.0 : p->middle[i] - m,
-				p->end[i],    p->end[i]    == 0.0 ? 0.0 : p->end[i]    - e);
+				p->start[i].cdf_data,  p->start[i].cdf_data  == 0.0 ? 0.0 : p->start[i].cdf_data  - s,
+				p->middle[i].cdf_data, p->middle[i].cdf_data == 0.0 ? 0.0 : p->middle[i].cdf_data - m,
+				p->end[i].cdf_data,    p->end[i].cdf_data    == 0.0 ? 0.0 : p->end[i].cdf_data    - e);
 		}
-		if (p->start[i]  > 0.0) s = p->start[i];
-		if (p->middle[i] > 0.0) m = p->middle[i];
-		if (p->end[i]    > 0.0) e = p->end[i];
+		if (p->start[i].cdf_data  > 0.0) s = p->start[i].cdf_data;
+		if (p->middle[i].cdf_data > 0.0) m = p->middle[i].cdf_data;
+		if (p->end[i].cdf_data    > 0.0) e = p->end[i].cdf_data;
 	}
 }
 
@@ -428,7 +435,7 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 				// roll for a starting letter
 				for (i = 0, rng = nrand(); i < l->num_letters; i++)
 				{
-					if (rng < l->singles->start[i])
+					if (rng < l->singles->start[i].cdf_data)
 						break;
 				}
 
@@ -438,7 +445,7 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 				// roll for the second letter
 				for (j = 0, rng = nrand(); j < l->num_letters; j++)
 				{
-					if (rng < l->doubles[i]->start[j])
+					if (rng < l->doubles[i]->start[j].cdf_data)
 						break;
 				}
 
@@ -448,7 +455,7 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 				// roll for the third letter
 				for (k = 0, rng = nrand(); k < l->num_letters; k++)
 				{
-					if (rng < l->triples[i][j]->start[k])
+					if (rng < l->triples[i][j]->start[k].cdf_data)
 						break;
 				}
 
@@ -478,7 +485,7 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 		{
 			for (k = 0; k < l->num_letters; k++)
 			{
-				if (rng < l->triples[i][j]->end[k]) // use the previous letter roll to find an ending triple
+				if (rng < l->triples[i][j]->end[k].cdf_data) // use the previous letter roll to find an ending triple
 				{
 					done = true; // no more letters needed, we just use the ending triple we found directly.
 					// note there may be an original bug here, if k from this roll wasn't sane, we end abruptly?
@@ -492,7 +499,7 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 		{
 			for (k = 0; k < l->num_letters; k++)
 			{
-				if (rng < l->triples[i][j]->middle[k]) // use the previous letter roll to find an middle triple
+				if (rng < l->triples[i][j]->middle[k].cdf_data) // use the previous letter roll to find an middle triple
 					break;
 			}
 		}
@@ -628,7 +635,7 @@ int main(int argc, char **argv)
 #define MAXFILESIZE (8+1+(sizeof(float)*((28*3)+(28*28*3)+(28*28*28*3))))
 	if ((len < MINFILESIZE) || (len > MAXFILESIZE))
 	{
-		eprintf(V_ERR,"E* Input file size of %d is too %s!\n", len, (len < MINFILESIZE)?"small":"large";
+		eprintf(V_ERR,"E* Input file size of %d is too %s!\n", len, (len < MINFILESIZE)?"small":"large");
 		fclose(in);
 		exit(1);
 	}
