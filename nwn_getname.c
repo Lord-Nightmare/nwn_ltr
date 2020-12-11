@@ -626,15 +626,9 @@ int main(int argc, char **argv)
 	// simple filesize sanity checks
 #define MINFILESIZE (8+1+(sizeof(float)*((1*3)+(1*1*3)+(1*1*1*3))))
 #define MAXFILESIZE (8+1+(sizeof(float)*((28*3)+(28*28*3)+(28*28*28*3))))
-	if (len < MINFILESIZE)
+	if ((len < MINFILESIZE) || (len > MAXFILESIZE))
 	{
-		eprintf(V_ERR,"E* input file size of %d is too small!\n", len);
-		fclose(in);
-		exit(1);
-	}
-	else if (len > MAXFILESIZE)
-	{
-		eprintf(V_ERR,"E* input file size of %d is too large!\n", len);
+		eprintf(V_ERR,"E* input file size of %d is too %s!\n", len, (len < MINFILESIZE)?"small":"large";
 		fclose(in);
 		exit(1);
 	}
