@@ -580,13 +580,13 @@ int main(int argc, char **argv)
 			case 'g':
 				paramidx++;
 				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -g parameter!\n"); usage(); exit(1); }
-				if (!sscanf(argv[paramidx], "%d", &c.generate)) { eprintf(V_ERR,"E* unable to parse argument for -g parameter!\n"); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &c.generate)) { eprintf(V_ERR,"E* Unable to parse argument for -g parameter!\n"); usage(); exit(1); }
 				paramidx++;
 				break;
 			case 's':
 				paramidx++;
 				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -s parameter!\n"); usage(); exit(1); }
-				if (!sscanf(argv[paramidx], "%d", &c.seed)) { eprintf(V_ERR,"E* unable to parse argument for -s parameter!\n"); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &c.seed)) { eprintf(V_ERR,"E* Unable to parse argument for -s parameter!\n"); usage(); exit(1); }
 				paramidx++;
 				break;
 			case 'f':
@@ -595,7 +595,7 @@ int main(int argc, char **argv)
 			case 'v':
 				paramidx++;
 				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -v parameter!\n"); usage(); exit(1); }
-				if (!sscanf(argv[paramidx], "%d", &c.verbose)) { eprintf(V_ERR,"E* unable to parse argument for -v parameter!\n"); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &c.verbose)) { eprintf(V_ERR,"E* Unable to parse argument for -v parameter!\n"); usage(); exit(1); }
 				paramidx++;
 				break;
 			case '\0':
@@ -628,7 +628,7 @@ int main(int argc, char **argv)
 #define MAXFILESIZE (8+1+(sizeof(float)*((28*3)+(28*28*3)+(28*28*28*3))))
 	if ((len < MINFILESIZE) || (len > MAXFILESIZE))
 	{
-		eprintf(V_ERR,"E* input file size of %d is too %s!\n", len, (len < MINFILESIZE)?"small":"large";
+		eprintf(V_ERR,"E* Input file size of %d is too %s!\n", len, (len < MINFILESIZE)?"small":"large";
 		fclose(in);
 		exit(1);
 	}
