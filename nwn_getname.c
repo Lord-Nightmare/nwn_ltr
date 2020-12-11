@@ -19,13 +19,19 @@ typedef int64_t s64;
 typedef uint64_t u64;
 
 // defines
-#undef DEBUG_PARAM
-#undef DEBUG_LOAD
-#undef DEBUG_FIX
-#undef DEBUG_FIX_VERBOSE
-#undef DEBUG_GEN
-#undef DEBUG_GEN_VERBOSE
-#undef DEBUG_FREE
+#define V_ERR   (1)
+#define V_PARAM (c.verbose & (1<<0))
+#define V_GEN   (c.verbose & (1<<1))
+#define V_GEN2  (c.verbose & (1<<2))
+#define V_FIX   (c.verbose & (1<<3))
+#define V_FIX2  (c.verbose & (1<<4))
+#define V_LOAD  (c.verbose & (1<<5))
+#define V_LOAD2 (c.verbose & (1<<6))
+#define V_FREE  (c.verbose & (1<<7))
+
+// verbose macro
+#define eprintf(v, ...) \
+	do { if (v) { fprintf(stderr, __VA_ARGS__); fflush(stderr); } } while (0)
 
 // struct definitions
 typedef struct cdf_array
@@ -50,6 +56,7 @@ typedef struct s_cfg
 	u32 generate;
 	u32 seed;
 	bool fix;
+	u32 verbose;
 } s_cfg;
 
 /* msrand implementation for consistency */
@@ -101,7 +108,7 @@ float* f_alloc(u32 count)
 	float* f = malloc(count * sizeof(float));
 	if (f == NULL)
 	{
-		fprintf(stderr,"E* Failure to allocate memory for array of size %d, aborting!\n", count); fflush(stderr);
+		eprintf(V_ERR,"E* Failure to allocate memory for array of size %d, aborting!\n", count);
 		return NULL;
 	}
 	return f;
@@ -112,7 +119,7 @@ cdf_array* cdf_alloc(u32 count)
 	cdf_array *c = malloc(sizeof(cdf_array));
 	if (c == NULL)
 	{
-		fprintf(stderr,"E* Failure to allocate memory for array, aborting!\n"); fflush(stderr);
+		eprintf(V_ERR,"E* Failure to allocate memory for array, aborting!\n");
 		exit(1);
 	}
 	c->start = f_alloc(count);
@@ -129,19 +136,19 @@ void cdf_free(cdf_array *c)
 	free(c);
 }
 
-ltrfile* ltr_load(FILE *in, u32 len)
+ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 {
 	ltrfile *l = malloc(sizeof(ltrfile));
 	u32 pos = 0;
 	// magic
 	{ // scope-limit
-		char* compare = "LTR V1.0 ";
+		const char* const compare = "LTR V1.0 ";
 		for (u32 i = 0; i < 8; i++)
 		{
 			l->magic[i] = fgetc(in);
 			if (l->magic[i] != compare[i])
 			{
-				fprintf(stderr,"E* Incorrect magic number! Exiting!\n"); fflush(stderr);
+				eprintf(V_ERR,"E* Incorrect magic number! Exiting!\n");
 				fclose(in);
 				exit(1);
 			}
@@ -152,14 +159,12 @@ ltrfile* ltr_load(FILE *in, u32 len)
 	l->num_letters = fgetc(in);
 	if ((l->num_letters < 1) || (l->num_letters > 28))
 	{
-		fprintf(stderr,"E* Invalid number of letters %d! Exiting!\n", l->num_letters); fflush(stderr);
+		eprintf(V_ERR,"E* Invalid number of letters %d! Exiting!\n", l->num_letters);
 		fclose(in);
 		exit(1);
 	}
 	pos++;
-#ifdef DEBUG_LOAD
-	fprintf(stderr,"D* LTR header read ok, num_letters = %d\n", l->num_letters); fflush(stderr);
-#endif
+	eprintf(V_LOAD,"D* LTR header read ok, num_letters = %d\n", l->num_letters);
 
 	// allocate and fill singles table
 	{ // scope-limit
@@ -169,9 +174,7 @@ ltrfile* ltr_load(FILE *in, u32 len)
 			fclose(in);
 			exit(1);
 		}
-#ifdef DEBUG_LOAD
-		fprintf(stderr,"D* successfully allocated the singles cdf table\n"); fflush(stderr);
-#endif
+		eprintf(V_LOAD2,"D* successfully allocated the singles cdf table\n");
 		for (u32 i = 0; i < l->num_letters; i++)
 		{
 			l->singles->start[i] = fget_f(in); pos+=4;
@@ -184,9 +187,7 @@ ltrfile* ltr_load(FILE *in, u32 len)
 		{
 			l->singles->end[i] = fget_f(in); pos+=4;
 		}
-#ifdef DEBUG_LOAD
-		fprintf(stderr,"D* successfully filled the singles cdf table\n"); fflush(stderr);
-#endif
+		eprintf(V_LOAD2,"D* successfully filled the singles cdf table\n");
 	}
 	// allocate and fill doubles tables
 	{ // scope-limit
@@ -199,9 +200,7 @@ ltrfile* ltr_load(FILE *in, u32 len)
 				fclose(in);
 				exit(1);
 			}
-#ifdef DEBUG_LOAD
-			fprintf(stderr,"D* successfully allocated the doubles cdf table %d\n", j); fflush(stderr);
-#endif
+			eprintf(V_LOAD2,"D* successfully allocated the doubles cdf table %d\n", j);
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
 				l->doubles[j]->start[i] = fget_f(in); pos+=4;
@@ -214,9 +213,7 @@ ltrfile* ltr_load(FILE *in, u32 len)
 			{
 				l->doubles[j]->end[i] = fget_f(in); pos+=4;
 			}
-#ifdef DEBUG_LOAD
-			fprintf(stderr,"D* successfully filled the doubles cdf table %d\n", j); fflush(stderr);
-#endif
+			eprintf(V_LOAD2,"D* successfully filled the doubles cdf table %d\n", j);
 		}
 	}
 	// allocate and fill triples tables
@@ -233,9 +230,7 @@ ltrfile* ltr_load(FILE *in, u32 len)
 					fclose(in);
 					exit(1);
 				}
-#ifdef DEBUG_LOAD
-				fprintf(stderr,"D* successfully allocated the triples cdf table %d:%d\n", k, j); fflush(stderr);
-#endif
+				eprintf(V_LOAD2,"D* successfully allocated the triples cdf table %d:%d\n", k, j);
 				for (u32 i = 0; i < l->num_letters; i++)
 				{
 					l->triples[k][j]->start[i] = fget_f(in); pos+=4;
@@ -248,19 +243,15 @@ ltrfile* ltr_load(FILE *in, u32 len)
 				{
 					l->triples[k][j]->end[i] = fget_f(in); pos+=4;
 				}
-#ifdef DEBUG_LOAD
-				fprintf(stderr,"D* successfully filled the triples cdf table %d:%d\n", k, j); fflush(stderr);
-#endif
+				eprintf(V_LOAD2,"D* successfully filled the triples cdf table %d:%d\n", k, j);
 			}
 		}
 	}
-#ifdef DEBUG_LOAD
-	fprintf(stderr,"D* all tables loaded, expected size was %d, final size was %d\n", len, pos); fflush(stderr);
-#endif
+	eprintf(V_LOAD,"D* all tables loaded, expected size was %d, final size was %d\n", len, pos);
 	return l;
 }
 
-void ltr_free(ltrfile* l)
+void ltr_free(ltrfile* l, s_cfg c)
 {
 	// first clear triples
 	for (u32 k = 0; k < l->num_letters; k++)
@@ -282,12 +273,10 @@ void ltr_free(ltrfile* l)
 	cdf_free(l->singles);
 	// then free the ltrfile itself
 	free(l);
-#ifdef DEBUG_FREE
-	fprintf(stderr,"D* everything is freed!\n"); fflush(stderr);
-#endif
+	eprintf(V_FREE,"D* everything is freed!\n");
 }
 
-void f_array_fix(float* t, u8 num_letters)
+void f_array_fix(float* t, u8 num_letters, s_cfg c)
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
 	float acc = 0.0;
@@ -304,18 +293,14 @@ void f_array_fix(float* t, u8 num_letters)
 			acc = t[i] + correction;
 			t[i] = acc;
 		}
-#ifdef DEBUG_FIX_VERBOSE
-		fprintf(stderr,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, t[i], acc, correction); fflush(stderr);
-#endif
+		eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, t[i], acc, correction);
 		prev = uncorrected;
 	}
-#ifdef DEBUG_FIX_VERBOSE
 	if ((acc < 0.9999) || (acc > 1.0001))
-		fprintf(stderr,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", acc);
-#endif
+		eprintf(V_FIX2,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", acc);
 }
 
-void ltr_fix(ltrfile* l) {
+void ltr_fix(ltrfile* l, s_cfg c) {
 	// There was a bug in the original code Bioware used to create .ltr files
 	// which caused the single.middle and single.end tables to have their CDF
 	// values corrupted for all entries past any which have a probability of
@@ -341,24 +326,16 @@ void ltr_fix(ltrfile* l) {
 	}
 	if (iscorrupt & 2)
 	{
-#ifdef DEBUG_FIX
-		fprintf(stderr,"Correcting errors in singles.middle probability table...\n"); fflush(stderr);
-#endif
-		f_array_fix(l->singles->middle, l->num_letters);
+		eprintf(V_FIX,"Correcting errors in singles.middle probability table...\n");
+		f_array_fix(l->singles->middle, l->num_letters, c);
 	}
 	if (iscorrupt & 1)
 	{
-#ifdef DEBUG_FIX
-		fprintf(stderr,"Correcting errors in singles.end probability table...\n");
-#endif
-		f_array_fix(l->singles->end, l->num_letters);
+		eprintf(V_FIX,"Correcting errors in singles.end probability table...\n");
+		f_array_fix(l->singles->end, l->num_letters, c);
 	}
 	if (iscorrupt != 0)
-	{
-#ifdef DEBUG_FIX
-		fprintf(stderr,"Corrections completed.\n");	fflush(stderr);
-#endif
-	}
+		eprintf(V_FIX,"Corrections completed.\n");
 }
 
 
@@ -399,21 +376,21 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg cfg)
 	}
 }
 
-void ltr_print(ltrfile* l, s_cfg cfg)
+void ltr_print(ltrfile* l, s_cfg c)
 {
-	if (!cfg.printcdf) return;
+	if (!c.printcdf) return;
 	printf("Number of letters in LTR: %d\n", l->num_letters);
 	printf("Sequence | CDF(start)  P(start) | CDF(middle)  P(middle) | CDF(end)  P(end)\n");
-	cdf_print(l->singles,l->num_letters,' ',' ',0,cfg);
+	cdf_print(l->singles,l->num_letters,' ',' ',0,c);
 	for (u8 j = 0; j < l->num_letters; j++)
 	{
-		cdf_print(l->doubles[j],l->num_letters,' ',j,1,cfg);
+		cdf_print(l->doubles[j],l->num_letters,' ',j,1,c);
 	}
 	for (u8 k = 0; k < l->num_letters; k++)
 	{
 		for (u8 j = 0; j < l->num_letters; j++)
 		{
-			cdf_print(l->triples[k][j],l->num_letters,k,j,2,cfg);
+			cdf_print(l->triples[k][j],l->num_letters,k,j,2,c);
 		}
 	}
 }
@@ -426,7 +403,7 @@ u8 l2offset(u8 in)
 	return ret;
 }
 
-void ltr_generate(ltrfile* l) // generate exactly one name.
+void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
 	char name[64] = {0};
@@ -436,14 +413,10 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 	float rng = 0.0;
 	u8 i, j, k;
 	s32 failcnt = 0;
-#ifdef DEBUG_GEN_VERBOSE
-	fprintf(stdout,"D* generating name...\n"); fflush(stdout);
-#endif
+	eprintf(V_GEN2,"D* generating name...\n");
 	while (!done) // if we're not done yet
 	{
-#ifdef DEBUG_GEN
-	if (index != 0) fprintf(stdout,"D* Current name state is \"%s\"\n", name); fflush(stdout);
-#endif
+		eprintf(V_GEN,"D* Current name state is \"%s\"\n", name);
 		// generate the first 3 letters
 		if (begin)
 		{
@@ -485,9 +458,7 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 			name[index++] = letters[i];
 			name[index++] = letters[j];
 			name[index++] = letters[k];
-#ifdef DEBUG_GEN
-			fprintf(stdout,"D* generated 3 first characters %c%c%c\n", letters[i], letters[j], letters[k]); fflush(stdout);
-#endif
+			eprintf(V_GEN,"D* generated 3 first characters %c%c%c\n", letters[i], letters[j], letters[k]);
 			begin = false;
 		}
 		// at this point index is at least 3.
@@ -511,9 +482,7 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 				{
 					done = true; // no more letters needed, we just use the ending triple we found directly.
 					// note there may be an original bug here, if k from this roll wasn't sane, we end abruptly?
-#ifdef DEBUG_GEN
-			fprintf(stdout,"D* rolled to end the name after the next letter\n"); fflush(stdout);
-#endif
+					eprintf(V_GEN,"D* rolled to end the name after the next letter\n");
 					break;
 				}
 			}
@@ -531,15 +500,11 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 		if (k < l->num_letters) // our roll was sane?
 		{
 			name[index++] = letters[k];
-#ifdef DEBUG_GEN_VERBOSE
-			fprintf(stdout,"D* generated another character %c\n", letters[k]); fflush(stdout);
-#endif
+			eprintf(V_GEN2,"D* generated another character %c\n", letters[k]);
 		}
 		else if ((index > 3) && (failcnt < 100)) // no, it wasn't. we may be stuck in an impossible situation, so back up and try again
 		{
-#ifdef DEBUG_GEN_VERBOSE
-			fprintf(stdout,"D* backing up 1 character after failing a roll\n"); fflush(stdout);
-#endif
+			eprintf(V_GEN2,"D* backing up 1 character after failing a roll\n");
 			// regenerate the old values for i and j
 			j = l2offset(name[index-2]);
 			i = l2offset(name[index-3]);
@@ -549,9 +514,7 @@ void ltr_generate(ltrfile* l) // generate exactly one name.
 		}
 		else // we're definitely stuck in a bad way. just start over.
 		{
-#ifdef DEBUG_GEN
-			fprintf(stdout,"D* giving up and starting over\n"); fflush(stdout);
-#endif
+			eprintf(V_GEN,"D* giving up and starting over\n");
 			index = 0; // DEBUG: set index to 0
 			begin = true;
 		}
@@ -572,6 +535,15 @@ void usage()
 	printf("-g #\t: generate # names (Default: 100)\n");
 	printf("-s #\t: use # as the seed (Default: random)\n");
 	printf("-f\t: if the ltr file has corrupt singles tables, do not fix them\n");
+	printf("-v #\t: verbose bitmask:\n");
+	printf("\tParams/Seed  1\n");
+	printf("\tGeneration   2\n");
+	printf("\t  Details    4\n");
+	printf("\tFix (default)8\n");
+	printf("\t  Details    16\n");
+	printf("\tLtr Load     32\n");
+	printf("\t  Details    64\n");
+	printf("\tLtr Free     128\n");
 }
 
 #define MIN_PARAMETERS 1
@@ -579,17 +551,18 @@ void usage()
 int main(int argc, char **argv)
 {
 	// defaults
-	s_cfg cfg;
+	s_cfg c;
 	{ // scope-limit
-		cfg.printcdf = 0;
-		cfg.generate = 100;
-		cfg.seed = time(NULL);
-		cfg.fix = true;
+		c.printcdf = 0;
+		c.generate = 100;
+		c.seed = time(NULL);
+		c.fix = true;
+		c.verbose = V_FIX;
 	}
 
 	if (argc < MIN_PARAMETERS+1)
 	{
-		fprintf(stderr,"E* Incorrect number of parameters!\n"); fflush(stderr);
+		eprintf(V_ERR,"E* Incorrect number of parameters!\n");
 		usage();
 		return 1;
 	}
@@ -601,23 +574,29 @@ int main(int argc, char **argv)
 		switch (*(argv[paramidx]++))
 		{
 			case 'p':
-				cfg.printcdf++;
-				if (cfg.printcdf > 2) { fprintf(stderr,"E* Too much verbosity specified for print cdf parameter!\n"); fflush(stderr); usage(); exit(1); }
+				c.printcdf++;
+				if (c.printcdf > 2) { eprintf(V_ERR,"E* Too much verbosity specified for print cdf parameter!\n"); usage(); exit(1); }
 				break;
 			case 'g':
 				paramidx++;
-				if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for -g parameter!\n"); fflush(stderr); usage(); exit(1); }
-				if (!sscanf(argv[paramidx], "%d", &cfg.generate)) { fprintf(stderr,"E* unable to parse argument for -g parameter!\n"); fflush(stderr); usage(); exit(1); }
+				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -g parameter!\n"); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &c.generate)) { eprintf(V_ERR,"E* unable to parse argument for -g parameter!\n"); usage(); exit(1); }
 				paramidx++;
 				break;
 			case 's':
 				paramidx++;
-				if (paramidx == (argc-1)) { fprintf(stderr,"E* Too few arguments for -s parameter!\n"); fflush(stderr); usage(); exit(1); }
-				if (!sscanf(argv[paramidx], "%d", &cfg.seed)) { fprintf(stderr,"E* unable to parse argument for -s parameter!\n"); fflush(stderr); usage(); exit(1); }
+				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -s parameter!\n"); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &c.seed)) { eprintf(V_ERR,"E* unable to parse argument for -s parameter!\n"); usage(); exit(1); }
 				paramidx++;
 				break;
 			case 'f':
-				cfg.fix = false;
+				c.fix = false;
+				break;
+			case 'v':
+				paramidx++;
+				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -v parameter!\n"); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &c.verbose)) { eprintf(V_ERR,"E* unable to parse argument for -v parameter!\n"); usage(); exit(1); }
+				paramidx++;
 				break;
 			case '\0':
 				paramidx++;
@@ -626,20 +605,17 @@ int main(int argc, char **argv)
 				// skip this character.
 				break;
 			default:
-				{ fprintf(stderr,"E* Invalid option!\n"); fflush(stderr); usage(); exit(1); }
+				{ eprintf(V_ERR,"E* Invalid option!\n"); usage(); exit(1); }
 				break;
 		}
 	}
-
-#ifdef DEBUG_PARAM
-	fprintf(stderr,"D* Parameters: generate: %d, seed: %d, print cdf: %s\n", cfg.generate, cfg.seed, cfg.printcdf?((cfg.printcdf==2)?"full":"brief"):"no"); fflush(stderr);
-#endif
+	eprintf(V_PARAM,"D* Parameters: generate: %d, seed: %d, print cdf: %s\n", c.generate, c.seed, c.printcdf?((c.printcdf==2)?"full":"brief"):"no");
 
 // input file
 	FILE *in = fopen(argv[argc-1], "rb");
 	if (!in)
 	{
-		fprintf(stderr,"E* Unable to open input file %s!\n", argv[argc-1]); fflush(stderr);
+		eprintf(V_ERR,"E* Unable to open input file %s!\n", argv[argc-1]);
 		return 1;
 	}
 
@@ -652,37 +628,37 @@ int main(int argc, char **argv)
 #define MAXFILESIZE (8+1+(sizeof(float)*((28*3)+(28*28*3)+(28*28*28*3))))
 	if (len < MINFILESIZE)
 	{
-		fprintf(stderr,"E* input file size of %d is too small!\n", len); fflush(stderr);
+		eprintf(V_ERR,"E* input file size of %d is too small!\n", len);
 		fclose(in);
 		exit(1);
 	}
 	else if (len > MAXFILESIZE)
 	{
-		fprintf(stderr,"E* input file size of %d is too large!\n", len); fflush(stderr);
+		eprintf(V_ERR,"E* input file size of %d is too large!\n", len);
 		fclose(in);
 		exit(1);
 	}
 
 	// seed it!
-	ms_srand(cfg.seed);
+	ms_srand(c.seed);
 
 	// load it!
-	ltrfile* infile = ltr_load(in, len);
+	ltrfile* infile = ltr_load(in, len, c);
 	fclose(in);
 
 	// fix it!
-	if (cfg.fix)
-		ltr_fix(infile);
+	if (c.fix)
+		ltr_fix(infile, c);
 
 	// print it!
-	ltr_print(infile, cfg);
+	ltr_print(infile, c);
 
 	// generate some names!
-	for (u32 i = 0; i < cfg.generate; i++)
-		ltr_generate(infile);
+	for (u32 i = 0; i < c.generate; i++)
+		ltr_generate(infile, c);
 
 	// free it!
-	ltr_free(infile);
+	ltr_free(infile, c);
 
 	return 0;
 }
