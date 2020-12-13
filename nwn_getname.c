@@ -36,7 +36,7 @@ typedef uint64_t u64;
 // struct definitions
 typedef struct f_array
 {
-	u32 count;
+	s32 count; // this is the number of this specific letter used in this table, the numerator for each letter
 	float cdf_data;
 	float pdf_data;
 } f_array;
@@ -46,6 +46,10 @@ typedef struct cdf_array
 	f_array* start;
 	f_array* middle;
 	f_array* end;
+	// these are the total counts for number of letters used to generate the 3 cdf tables, the common denominator for all letters within each array
+	s32 start_cnt;
+	s32 middle_cnt;
+	s32 end_cnt;
 } cdf_array;
 
 typedef struct ltrfile
@@ -173,6 +177,79 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 	pos++;
 	eprintf(V_LOAD,"D* LTR header read ok, num_letters = %d\n", l->num_letters);
 
+#define LOAD_LTR_FLOATS(x) \
+	{ \
+		float tmp = 0.0; \
+		for (u32 i = 0; i < l->num_letters; i++) \
+		{ \
+			x[i].cdf_data = fget_f(in); \
+			x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - tmp) : 0.0; \
+			x[i].count = -1; \
+			pos += 4; \
+			if (x[i].cdf_data) tmp = x[i].cdf_data; \
+		} \
+	}
+
+	// There was a bug in the original code Bioware used to create .ltr files
+	// which caused the single.middle and single.end tables to have their CDF
+	// values corrupted for all entries past any which have a probability of
+	// zero.
+	// Fortunately, this can be corrected for in post, which we do here.
+
+	// If the final nonzero value in the table is not 'exactly' 1.0, then they
+	// are corrupt.
+	// Note that likely due to precision loss sometime during generation by
+	// Bioware's utility, the results, even after correction, may not exactly
+	// accumulate to 1.000000f, so we give a small bit of leeway.
+#define LOAD_FIX_LTR_FLOATS(x) \
+	{ \
+		const char* const letters = "abcdefghijklmnopqrstuvwxyz'-"; \
+		float tmp = 0.0; \
+		bool iscorrupt = true; \
+		for (u32 i = 0; i < l->num_letters; i++) \
+		{ \
+			if ((x[i].cdf_data >= 0.9999) && (x[i].cdf_data <= 1.0001)) \
+			iscorrupt = false; \
+		} \
+		if (iscorrupt) \
+		{ \
+			float prev = 0.0; \
+			float correction = 0.0; \
+			float uncorrected = 0.0; \
+			eprintf(V_FIX,"Correcting errors in a probability table...\n"); \
+			for (u32 i = 0; i < l->num_letters; i++) \
+			{ \
+				x[i].cdf_data = fget_f(in); \
+				uncorrected = x[i].cdf_data; \
+				if (x[i].cdf_data) \
+				{ \
+					if ((i > 0) && (prev == 0.0)) \
+						correction = tmp; \
+					tmp = x[i].cdf_data + correction; \
+					x[i].cdf_data = tmp; \
+				} \
+				x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - correction) : 0.0; \
+				x[i].count = -1; \
+				pos += 4; \
+				eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, x[i].cdf_data, tmp, correction); \
+				prev = uncorrected; \
+			} \
+			if ((tmp < 0.9999) || (tmp > 1.0001)) \
+				eprintf(V_FIX2,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", tmp); \
+		} \
+		else \
+		{ \
+			for (u32 i = 0; i < l->num_letters; i++) \
+			{ \
+				x[i].cdf_data = fget_f(in); \
+				x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - tmp) : 0.0; \
+				x[i].count = -1; \
+				pos += 4; \
+				if (x[i].cdf_data) tmp = x[i].cdf_data; \
+			} \
+		} \
+	}
+
 	// allocate and fill singles table
 	{ // scope-limit
 		l->singles = cdf_alloc(l->num_letters);
@@ -182,17 +259,16 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 			exit(1);
 		}
 		eprintf(V_LOAD2,"D* successfully allocated the singles cdf table\n");
-		for (u32 i = 0; i < l->num_letters; i++)
+		LOAD_LTR_FLOATS(l->singles->start);
+		if (c.fix)
 		{
-			l->singles->start[i].cdf_data = fget_f(in); pos+=4;
+			LOAD_FIX_LTR_FLOATS(l->singles->middle);
+			LOAD_FIX_LTR_FLOATS(l->singles->end);
 		}
-		for (u32 i = 0; i < l->num_letters; i++)
+		else
 		{
-			l->singles->middle[i].cdf_data = fget_f(in); pos+=4;
-		}
-		for (u32 i = 0; i < l->num_letters; i++)
-		{
-			l->singles->end[i].cdf_data = fget_f(in); pos+=4;
+			LOAD_LTR_FLOATS(l->singles->middle);
+			LOAD_LTR_FLOATS(l->singles->end);
 		}
 		eprintf(V_LOAD2,"D* successfully filled the singles cdf table\n");
 	}
@@ -208,18 +284,9 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 				exit(1);
 			}
 			eprintf(V_LOAD2,"D* successfully allocated the doubles cdf table %d\n", j);
-			for (u32 i = 0; i < l->num_letters; i++)
-			{
-				l->doubles[j]->start[i].cdf_data = fget_f(in); pos+=4;
-			}
-			for (u32 i = 0; i < l->num_letters; i++)
-			{
-				l->doubles[j]->middle[i].cdf_data = fget_f(in); pos+=4;
-			}
-			for (u32 i = 0; i < l->num_letters; i++)
-			{
-				l->doubles[j]->end[i].cdf_data = fget_f(in); pos+=4;
-			}
+			LOAD_LTR_FLOATS(l->doubles[j]->start);
+			LOAD_LTR_FLOATS(l->doubles[j]->middle);
+			LOAD_LTR_FLOATS(l->doubles[j]->end);
 			eprintf(V_LOAD2,"D* successfully filled the doubles cdf table %d\n", j);
 		}
 	}
@@ -238,18 +305,9 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 					exit(1);
 				}
 				eprintf(V_LOAD2,"D* successfully allocated the triples cdf table %d:%d\n", k, j);
-				for (u32 i = 0; i < l->num_letters; i++)
-				{
-					l->triples[k][j]->start[i].cdf_data = fget_f(in); pos+=4;
-				}
-				for (u32 i = 0; i < l->num_letters; i++)
-				{
-					l->triples[k][j]->middle[i].cdf_data = fget_f(in); pos+=4;
-				}
-				for (u32 i = 0; i < l->num_letters; i++)
-				{
-					l->triples[k][j]->end[i].cdf_data = fget_f(in); pos+=4;
-				}
+				LOAD_LTR_FLOATS(l->triples[k][j]->start);
+				LOAD_LTR_FLOATS(l->triples[k][j]->middle);
+				LOAD_LTR_FLOATS(l->triples[k][j]->end);
 				eprintf(V_LOAD2,"D* successfully filled the triples cdf table %d:%d\n", k, j);
 			}
 		}
@@ -283,76 +341,12 @@ void ltr_free(ltrfile* l, s_cfg c)
 	eprintf(V_FREE,"D* everything is freed!\n");
 }
 
-void f_array_fix(f_array* t, u8 num_letters, s_cfg c)
-{
-	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
-	float acc = 0.0;
-	float prev = 0.0;
-	float correction = 0.0;
-	float uncorrected = 0.0;
-	for (u8 i = 0; i < num_letters; i++)
-	{
-		uncorrected = t[i].cdf_data;
-		if (t[i].cdf_data != 0.0)
-		{
-			if ((i > 0) && (prev == 0.0))
-				correction = acc;
-			acc = t[i].cdf_data + correction;
-			t[i].cdf_data = acc;
-		}
-		eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, t[i].cdf_data, acc, correction);
-		prev = uncorrected;
-	}
-	if ((acc < 0.9999) || (acc > 1.0001))
-		eprintf(V_FIX2,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", acc);
-}
-
-void ltr_fix(ltrfile* l, s_cfg c) {
-	// There was a bug in the original code Bioware used to create .ltr files
-	// which caused the single.middle and single.end tables to have their CDF
-	// values corrupted for all entries past any which have a probability of
-	// zero.
-	// Fortunately, this can be corrected for in post, which we do here.
-
-	// If the final nonzero value in the table is not 'exactly' 1.0, then they
-	// are corrupt.
-	// Note that likely due to precision loss sometime during generation by
-	// Bioware's utility, the results, even after correction, may not exactly
-	// accumulate to 1.000000f, so we give a small bit of leeway.
-	u32 iscorrupt = 3;
-	for (u32 i = 0; i < l->num_letters; i++)
-	{
-		if ((l->singles->middle[i].cdf_data >= 0.9999) && (l->singles->middle[i].cdf_data <= 1.0001))
-		{
-			iscorrupt &= ~2; // the middle table is not corrupt
-		}
-		if ((l->singles->end[i].cdf_data >= 0.9999) && (l->singles->end[i].cdf_data <= 1.0001))
-		{
-			iscorrupt &= ~1; // the end table is not corrupt
-		}
-	}
-	if (iscorrupt & 2)
-	{
-		eprintf(V_FIX,"Correcting errors in singles.middle probability table...\n");
-		f_array_fix(l->singles->middle, l->num_letters, c);
-	}
-	if (iscorrupt & 1)
-	{
-		eprintf(V_FIX,"Correcting errors in singles.end probability table...\n");
-		f_array_fix(l->singles->end, l->num_letters, c);
-	}
-	if (iscorrupt != 0)
-		eprintf(V_FIX,"Corrections completed.\n");
-}
-
-
 void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg cfg)
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
 	u8 a = ' ';
 	u8 b = ' ';
 	u8 c = ' ';
-	float s = 0.0, m = 0.0, e = 0.0;
 	for (u8 i = 0; i < num_letters; i++) {
 		// formatting
 		if (num == 0)
@@ -372,14 +366,12 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg cfg)
 		}
 		if ((cfg.printcdf == 2) || !((p->start[i].cdf_data == 0.0) && (p->middle[i].cdf_data == 0.0) && (p->end[i].cdf_data == 0.0)))
 		{
-			printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n", a, b, c,
-				p->start[i].cdf_data,  p->start[i].cdf_data  == 0.0 ? 0.0 : p->start[i].cdf_data  - s,
-				p->middle[i].cdf_data, p->middle[i].cdf_data == 0.0 ? 0.0 : p->middle[i].cdf_data - m,
-				p->end[i].cdf_data,    p->end[i].cdf_data    == 0.0 ? 0.0 : p->end[i].cdf_data    - e);
+			printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n",
+				a, b, c,
+				p->start[i].cdf_data, p->start[i].pdf_data,
+				p->middle[i].cdf_data, p->middle[i].pdf_data,
+				p->end[i].cdf_data, p->end[i].pdf_data);
 		}
-		if (p->start[i].cdf_data  > 0.0) s = p->start[i].cdf_data;
-		if (p->middle[i].cdf_data > 0.0) m = p->middle[i].cdf_data;
-		if (p->end[i].cdf_data    > 0.0) e = p->end[i].cdf_data;
 	}
 }
 
@@ -529,6 +521,7 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 	name[index] = '\0'; // add a trailing null
 	// capitalize the first letter if it is a-z, leave it alone if it is - or '
 	name[0] = toupper(name[0]);
+	eprintf(V_GEN2,"D* generated name: %s\n", name);
 	printf("%s\n", name);
 }
 
@@ -647,9 +640,8 @@ int main(int argc, char **argv)
 	ltrfile* infile = ltr_load(in, len, c);
 	fclose(in);
 
-	// fix it!
-	if (c.fix)
-		ltr_fix(infile, c);
+	// analyze it!
+	// ltr_analyze(infile, c);
 
 	// print it!
 	ltr_print(infile, c);
