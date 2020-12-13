@@ -179,22 +179,21 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 
 #define LOAD_LTR_FLOATS(x) \
 	{ \
-		float tmp = 0.0; \
+		float acc = 0.0; \
 		for (u32 i = 0; i < l->num_letters; i++) \
 		{ \
 			x[i].cdf_data = fget_f(in); \
-			x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - tmp) : 0.0; \
+			x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - acc) : 0.0; \
 			x[i].count = -1; \
 			pos += 4; \
-			if (x[i].cdf_data) tmp = x[i].cdf_data; \
+			if (x[i].cdf_data) acc = x[i].cdf_data; \
 		} \
 	}
 
 	// There was a bug in the original code Bioware used to create .ltr files
 	// which caused the single.middle and single.end tables to have their CDF
 	// values corrupted for all entries past any which have a probability of
-	// zero.
-	// Fortunately, this can be corrected for in post, which we do here.
+	// zero. Fortunately, this can be corrected for in post, which we do here.
 
 	// If the final nonzero value in the table is not 'exactly' 1.0, then they
 	// are corrupt.
@@ -204,15 +203,15 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 #define LOAD_FIX_LTR_FLOATS(x) \
 	{ \
 		const char* const letters = "abcdefghijklmnopqrstuvwxyz'-"; \
-		float tmp = 0.0; \
 		bool iscorrupt = true; \
 		for (u32 i = 0; i < l->num_letters; i++) \
 		{ \
 			if ((x[i].cdf_data >= 0.9999) && (x[i].cdf_data <= 1.0001)) \
-			iscorrupt = false; \
+				iscorrupt = false; \
 		} \
-		if (iscorrupt) \
+		if (iscorrupt && c.fix) \
 		{ \
+			float acc = 0.0; \
 			float prev = 0.0; \
 			float correction = 0.0; \
 			float uncorrected = 0.0; \
@@ -224,29 +223,22 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 				if (x[i].cdf_data) \
 				{ \
 					if ((i > 0) && (prev == 0.0)) \
-						correction = tmp; \
-					tmp = x[i].cdf_data + correction; \
-					x[i].cdf_data = tmp; \
+						correction = acc; \
+					acc = x[i].cdf_data + correction; \
+					x[i].cdf_data = acc; \
 				} \
 				x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - correction) : 0.0; \
 				x[i].count = -1; \
 				pos += 4; \
-				eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, x[i].cdf_data, tmp, correction); \
+				eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, x[i].cdf_data, acc, correction); \
 				prev = uncorrected; \
 			} \
-			if ((tmp < 0.9999) || (tmp > 1.0001)) \
-				eprintf(V_FIX2,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", tmp); \
+			if ((acc < 0.9999) || (acc > 1.0001)) \
+				eprintf(V_FIX2,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", acc); \
 		} \
 		else \
 		{ \
-			for (u32 i = 0; i < l->num_letters; i++) \
-			{ \
-				x[i].cdf_data = fget_f(in); \
-				x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - tmp) : 0.0; \
-				x[i].count = -1; \
-				pos += 4; \
-				if (x[i].cdf_data) tmp = x[i].cdf_data; \
-			} \
+			LOAD_LTR_FLOATS(x); \
 		} \
 	}
 
@@ -260,16 +252,8 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 		}
 		eprintf(V_LOAD2,"D* successfully allocated the singles cdf table\n");
 		LOAD_LTR_FLOATS(l->singles->start);
-		if (c.fix)
-		{
-			LOAD_FIX_LTR_FLOATS(l->singles->middle);
-			LOAD_FIX_LTR_FLOATS(l->singles->end);
-		}
-		else
-		{
-			LOAD_LTR_FLOATS(l->singles->middle);
-			LOAD_LTR_FLOATS(l->singles->end);
-		}
+		LOAD_FIX_LTR_FLOATS(l->singles->middle);
+		LOAD_FIX_LTR_FLOATS(l->singles->end);
 		eprintf(V_LOAD2,"D* successfully filled the singles cdf table\n");
 	}
 	// allocate and fill doubles tables
