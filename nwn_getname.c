@@ -64,11 +64,13 @@ typedef struct ltrfile
 
 typedef struct s_cfg
 {
+	const char* const letters;
 	int printcdf;
 	u32 generate;
 	u32 seed;
 	bool fix;
 	u32 verbose;
+	bool dumpstart;
 } s_cfg;
 
 /* msrand implementation for consistency */
@@ -203,7 +205,6 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 	// accumulate to 1.000000f, so we give a small bit of leeway.
 #define LOAD_FIX_LTR_FLOATS(x) \
 	{ \
-		const char* const letters = "abcdefghijklmnopqrstuvwxyz'-"; \
 		bool iscorrupt = true; \
 		for (u32 i = 0; i < l->num_letters; i++) \
 		{ \
@@ -231,7 +232,7 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 				x[i].pdf_data = (x[i].cdf_data) ? (x[i].cdf_data - correction) : 0.0; \
 				x[i].count = -1; \
 				pos += 4; \
-				eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", letters[i], uncorrected, x[i].cdf_data, acc, correction); \
+				eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", c.letters[i], uncorrected, x[i].cdf_data, acc, correction); \
 				prev = uncorrected; \
 			} \
 			if ((acc < 0.9999) || (acc > 1.0001)) \
@@ -341,7 +342,6 @@ double get_mean_squared_error(f_array* input, u32 factor, u8 num_letters)
 #define THRESH_FLOATNOISE 0.000001
 u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 {
-	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
 	float minimum = 1.1;
 	for (u32 i = 0; i < num_letters; i++)
 	{
@@ -422,6 +422,26 @@ void cdf_analyze(cdf_array* p, u8 num_letters, s_cfg c)
 	f_array_populate(p->end, num_letters, p->end_cnt, c);
 }
 
+#define THRESH_FLOATNOISE 0.000001
+bool is_exact_multiple(u32 i, u32 j)
+{
+	if (i == j)
+		return true;
+	float fi = i;
+	float fj = j;
+	float fg = fi;
+	float fl = fj;
+	if (fj > fg)
+	{
+		fg = fj;
+		fl = fi;
+	}
+	if (fabs((fg / fl) - round(fg / fl)) > THRESH_FLOATNOISE)
+		return false;
+	else
+		return true;
+}
+
 void ltr_analyze(ltrfile* l, s_cfg c)
 {
 	cdf_analyze(l->singles, l->num_letters, c);
@@ -436,11 +456,54 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 			cdf_analyze(l->triples[k][j], l->num_letters, c);
 		}
 	}
+
+	// the numbers of names should be correct but could be off by some factor, so lets do some heuristics to correct this
+	// first: whichever of the counts for the singles->start_cnt and singles->end_cnt is higher is automatically correct, if they're not the same AND are an even multiple of one another
+	// some files were hand-edited and hence the two singles tables will not be an exact multiple of one another, and if so, don't try to fix them here!
+	if (is_exact_multiple(l->singles->start_cnt,l->singles->end_cnt))
+	{
+		if (l->singles->start_cnt > l->singles->end_cnt) // start was higher
+		{
+			u32 c_factor = l->singles->start_cnt / l->singles->end_cnt;
+			eprintf(V_ERR,"D* fixing singles->end table by factor of %d:\n", c_factor);
+			// iterate through the table and correct the numerators
+			for (u32 i = 0; i < l->num_letters; i++)
+			{
+				l->singles->end[i].count *= c_factor;
+			}
+			// correct the denominator
+			l->singles->end_cnt = l->singles->start_cnt;
+		}
+		else if (l->singles->start_cnt < l->singles->end_cnt) // end was higher
+		{
+			u32 c_factor = l->singles->end_cnt / l->singles->start_cnt;
+			eprintf(V_ERR,"D* fixing singles->start table by factor of %d:\n", c_factor);
+			// iterate through the table and correct the numerators
+			for (u32 i = 0; i < l->num_letters; i++)
+			{
+				l->singles->start[i].count *= c_factor;
+			}
+			// correct the denominator
+			l->singles->start_cnt = l->singles->end_cnt;
+		}
+	}
+	else
+	{
+		eprintf(V_ERR,"D* cannot equalize start and end tables as they are not an even factor of one another!\n");
+	}
+
+	// next heuristic: if the singles->start[*] count for letter * doesn't equal the denominator for doubles[*]->start_cnt but is off by some factor, increase the latter to match
+	for (u32 i = 0; i < l->num_letters; i++)
+	{
+		if (l->singles->start[i].count != l->doubles[i]->start_cnt)
+		{
+			eprintf(V_ERR,"D* count mismatch for singles->start[%c] (%d) vs doubles[%c]->start_cnt (%d)\n", c.letters[i], l->singles->start[i].count, c.letters[i], l->doubles[i]->start_cnt);
+		}
+	}
 }
 
 void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
 {
-	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
 	u8 x = ' ';
 	u8 y = ' ';
 	u8 z = ' ';
@@ -448,18 +511,18 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
 		// formatting
 		if (num == 0)
 		{
-			x = letters[i];
+			x = c.letters[i];
 		}
 		else if (num == 1)
 		{
-			x = letters[j];
-			y = letters[i];
+			x = c.letters[j];
+			y = c.letters[i];
 		}
 		else // num == 2
 		{
-			x = letters[k];
-			y = letters[j];
-			z = letters[i];
+			x = c.letters[k];
+			y = c.letters[j];
+			z = c.letters[i];
 		}
 		if ((c.printcdf == 2) || !((p->start[i].cdf_data == 0.0) && (p->middle[i].cdf_data == 0.0) && (p->end[i].cdf_data == 0.0)))
 		{
@@ -468,7 +531,7 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
 				p->start[i].cdf_data, p->start[i].pdf_data,
 				p->middle[i].cdf_data, p->middle[i].pdf_data,
 				p->end[i].cdf_data, p->end[i].pdf_data);*/
-			printf("%c%c%c      |% .5f     %2d /%3d  |% .5f      %2d /%3d   |% .5f   %2d /%3d\n",
+			printf("%c%c%c      |% .5f %5d /%5d |% .5f   %5d /%5d |% .5f %5d /%5d\n",
 				x, y, z,
 				p->start[i].pdf_data, p->start[i].count, p->start_cnt,
 				p->middle[i].pdf_data, p->middle[i].count,p->middle_cnt,
@@ -496,6 +559,44 @@ void ltr_print(ltrfile* l, s_cfg c)
 	}
 }
 
+void ltr_dumpstart(ltrfile* l, s_cfg c)
+{
+	printf("D* %d names total:\n", l->singles->start_cnt);
+	for (u32 k = 0; k < l->num_letters; k++)
+	{
+		for (u32 j = 0; j < l->num_letters; j++)
+		{
+			for (u32 i = 0; i < l->num_letters; i++)
+			{
+				
+			}
+		}
+	}
+}
+
+/*
+		if (l->singles->start[i].pdf_data != 0.0)
+		{
+			for (u32 m = 0; m < (l->singles->start[i].count * singles_m); m++)
+			{
+				printf("%c", c.letters[i]); // first letter
+				// deeper...
+				u32 doubles_m = (l->singles->start[i].count / l->doubles[i]->start_cnt);
+				for (u32 j = 0; j < l->num_letters; j++)
+				{
+					if (l->doubles[i]->start[j].pdf_data != 0.0)
+					{
+						for (u32 n = 0; n < (l->doubles[i]->start[j].count * doubles_m); n++)
+						{
+							printf("%c", c.letters[j]); // second letter
+						}
+					}
+				}
+				printf("\n");
+			}
+		}
+*/
+
 u8 l2offset(u8 in)
 {
 	u8 ret = in - 'a';
@@ -506,7 +607,7 @@ u8 l2offset(u8 in)
 
 void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 {
-	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
+
 	char name[64] = {0};
 	u32 index = 0;
 	bool done = false;
@@ -556,10 +657,10 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 			} while ((i >= l->num_letters) || (j >= l->num_letters) || (k >= l->num_letters)); // sanity check and loop condition in one
 
 			// we did it! shove these 3 letters into a string
-			name[index++] = letters[i];
-			name[index++] = letters[j];
-			name[index++] = letters[k];
-			eprintf(V_GEN,"D* generated 3 first characters %c%c%c\n", letters[i], letters[j], letters[k]);
+			name[index++] = c.letters[i];
+			name[index++] = c.letters[j];
+			name[index++] = c.letters[k];
+			eprintf(V_GEN,"D* generated 3 first characters %c%c%c\n", c.letters[i], c.letters[j], c.letters[k]);
 			begin = false;
 		}
 		// at this point index is at least 3.
@@ -600,8 +701,8 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 
 		if (k < l->num_letters) // our roll was sane?
 		{
-			name[index++] = letters[k];
-			eprintf(V_GEN2,"D* generated another character %c\n", letters[k]);
+			name[index++] = c.letters[k];
+			eprintf(V_GEN2,"D* generated another character %c\n", c.letters[k]);
 		}
 		else if ((index > 3) && (failcnt < 100)) // no, it wasn't. we may be stuck in an impossible situation, so back up and try again
 		{
@@ -637,6 +738,7 @@ void usage()
 	printf("-g #\t: generate # names (Default: 100)\n");
 	printf("-s #\t: use # as the seed (Default: random)\n");
 	printf("-f\t: if the ltr file has corrupt singles tables, do not fix them\n");
+	printf("-d\t: dump the starting letters of every possible name\n");
 	printf("-v #\t: verbose bitmask:\n");
 	printf("\tParams/Seed  1\n");
 	printf("\tGeneration   2\n");
@@ -653,14 +755,16 @@ void usage()
 int main(int argc, char **argv)
 {
 	// defaults
-	s_cfg c;
-	{ // scope-limit
-		c.printcdf = 0;
-		c.generate = 100;
-		c.seed = time(NULL);
-		c.fix = true;
-		c.verbose = V_FIX;
-	}
+	s_cfg c =
+	{
+		"abcdefghijklmnopqrstuvwxyz'-" // letters
+		, 0 // printcdf
+		, 100 // generate
+		, time(NULL) // seed
+		, true // fix
+		, V_FIX // verbose
+		, false // dumpstart
+	};
 
 	if (argc < MIN_PARAMETERS+1)
 	{
@@ -693,6 +797,9 @@ int main(int argc, char **argv)
 				break;
 			case 'f':
 				c.fix = false;
+				break;
+			case 'd':
+				c.dumpstart = true;
 				break;
 			case 'v':
 				paramidx++;
@@ -747,6 +854,9 @@ int main(int argc, char **argv)
 
 	// print it!
 	ltr_print(infile, c);
+
+	// dump it!
+	ltr_dumpstart(infile, c);
 
 	// generate some names!
 	for (u32 i = 0; i < c.generate; i++)
