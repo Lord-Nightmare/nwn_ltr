@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <ctype.h>
 #include <time.h>
+#include <math.h>
 
 // basic typedefs
 typedef int8_t s8;
@@ -325,36 +326,153 @@ void ltr_free(ltrfile* l, s_cfg c)
 	eprintf(V_FREE,"D* everything is freed!\n");
 }
 
-void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg cfg)
+double get_mean_squared_error(f_array* input, u32 factor, u8 num_letters)
+{
+	double acc = 0.0;
+	for (u8 i = 0; i < num_letters; i++)
+	{
+		u32 nearest_int = round(input[i].pdf_data * factor);
+		acc += pow((input[i].pdf_data * factor) - (double)nearest_int, 2.0);
+	}
+	return acc/num_letters;
+}
+
+#define THRESH_MAXALLOWED 0.0001
+#define THRESH_FLOATNOISE 0.000001
+u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 {
 	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
-	u8 a = ' ';
-	u8 b = ' ';
-	u8 c = ' ';
+	float minimum = 1.1;
+	for (u32 i = 0; i < num_letters; i++)
+	{
+		if ((f[i].pdf_data != 0.0) && (f[i].pdf_data < minimum))
+			minimum = f[i].pdf_data;
+	}
+	if ((minimum == 1.1) || (fabs(1.1 - minimum) < THRESH_FLOATNOISE)) // we know for sure this table is empty.
+		return 0;
+	if (minimum == 1.0) // we know for sure this table has a single 1.0 value in it.
+		return 1;
+	if (minimum == 0.5) // we know for sure this table has exactly two 0.5 values in it.
+		return 2;
+	// beyond that we can't prove anything.
+
+	// based on this, we can take an educated first guess
+	double invmin = 1.0 / minimum;
+	eprintf(V_ERR,"D* inverse of minimum probability %f is %f\n", minimum, invmin);
+	// but if this is not an integer, try multiplying it by a bunch of guesses to see if we can get it close to an integer.
+
+	if (fabs(invmin - round(invmin)) > THRESH_FLOATNOISE)
+	{
+		double min_error = 1000000.0;
+		u32 best_guess = 0;
+		for (u32 guess = 2; guess < 100; guess++)
+		{
+			double this_error = fabs((invmin*guess) - round(invmin*guess));
+			//eprintf(V_ERR,"D* factor: testing guess of %d (error of %f), min error is %f\n", guess, this_error, min_error);
+			if (this_error < min_error)
+			{
+				//eprintf(V_ERR,"D* factor: got a better guess (with an error of %f) of %d\n", this_error, guess);
+				best_guess = guess;
+				min_error = this_error;
+				if (min_error < THRESH_MAXALLOWED)
+					break;
+			}
+		}
+		eprintf(V_ERR,"D* factor: guessed error factor is %d, yielding %f\n", best_guess, invmin*best_guess);
+	}
+
+	// using the inverse of the minimum as an initial guess, find the smallest possible
+	// integer that can be multipled against all of the PDF numbers that results in
+	// the results being completely integer with nothing after the decimal point.
+	// this is the number of words used to generate this list in the first place.
+	// the guess above should be off by a factor 
+	double min_error = 1000000.0;
+	u32 best_guess = 0;
+	for (u32 guess = 3; guess < 30000; guess++)
+	{
+		double this_error = get_mean_squared_error(f, guess, num_letters);
+		if (this_error < min_error) // we have a better guess!
+		{
+			eprintf(V_ERR,"D* got a better guess (with an error of %f) of %d\n", this_error, guess);
+			best_guess = guess;
+			min_error = this_error;
+			//if (((min_error - this_error) <= THRESH_MAXALLOWED) && ((min_error - this_error) >= THRESH_FLOATNOISE))
+			if (min_error < THRESH_FLOATNOISE)
+				break;
+		}
+	}
+	//eprintf(V_ERR,"D* best guess (with an error of %f) was %d\n", min_error, best_guess);
+	return best_guess;
+}
+
+// fill in the f_array->count values
+void f_array_populate(f_array* f, u8 num_letters, u32 count, s_cfg c)
+{
+	for (u32 i = 0; i < num_letters; i++)
+		f[i].count = round(f[i].pdf_data * count);
+}
+
+void cdf_analyze(cdf_array* p, u8 num_letters, s_cfg c)
+{
+	p->start_cnt = f_array_analyze(p->start, num_letters, c);
+	f_array_populate(p->start, num_letters, p->start_cnt, c);
+	p->middle_cnt = f_array_analyze(p->middle, num_letters, c);
+	f_array_populate(p->middle, num_letters, p->middle_cnt, c);
+	p->end_cnt = f_array_analyze(p->end, num_letters, c);
+	f_array_populate(p->end, num_letters, p->end_cnt, c);
+}
+
+void ltr_analyze(ltrfile* l, s_cfg c)
+{
+	cdf_analyze(l->singles, l->num_letters, c);
+	for (u32 j = 0; j < l->num_letters; j++)
+	{
+		cdf_analyze(l->doubles[j], l->num_letters, c);
+	}
+	for (u32 k = 0; k < l->num_letters; k++)
+	{
+		for (u32 j = 0; j < l->num_letters; j++)
+		{
+			cdf_analyze(l->triples[k][j], l->num_letters, c);
+		}
+	}
+}
+
+void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
+{
+	const char* const letters = "abcdefghijklmnopqrstuvwxyz'-";
+	u8 x = ' ';
+	u8 y = ' ';
+	u8 z = ' ';
 	for (u8 i = 0; i < num_letters; i++) {
 		// formatting
 		if (num == 0)
 		{
-			a = letters[i];
+			x = letters[i];
 		}
 		else if (num == 1)
 		{
-			a = letters[j];
-			b = letters[i];
+			x = letters[j];
+			y = letters[i];
 		}
 		else // num == 2
 		{
-			a = letters[k];
-			b = letters[j];
-			c = letters[i];
+			x = letters[k];
+			y = letters[j];
+			z = letters[i];
 		}
-		if ((cfg.printcdf == 2) || !((p->start[i].cdf_data == 0.0) && (p->middle[i].cdf_data == 0.0) && (p->end[i].cdf_data == 0.0)))
+		if ((c.printcdf == 2) || !((p->start[i].cdf_data == 0.0) && (p->middle[i].cdf_data == 0.0) && (p->end[i].cdf_data == 0.0)))
 		{
-			printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n",
-				a, b, c,
+			/*printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n",
+				x, y, z,
 				p->start[i].cdf_data, p->start[i].pdf_data,
 				p->middle[i].cdf_data, p->middle[i].pdf_data,
-				p->end[i].cdf_data, p->end[i].pdf_data);
+				p->end[i].cdf_data, p->end[i].pdf_data);*/
+			printf("%c%c%c      |% .5f     %2d /%3d  |% .5f      %2d /%3d   |% .5f   %2d /%3d\n",
+				x, y, z,
+				p->start[i].pdf_data, p->start[i].count, p->start_cnt,
+				p->middle[i].pdf_data, p->middle[i].count,p->middle_cnt,
+				p->end[i].pdf_data, p->end[i].count,p->end_cnt);
 		}
 	}
 }
@@ -625,7 +743,7 @@ int main(int argc, char **argv)
 	fclose(in);
 
 	// analyze it!
-	// ltr_analyze(infile, c);
+	ltr_analyze(infile, c);
 
 	// print it!
 	ltr_print(infile, c);
