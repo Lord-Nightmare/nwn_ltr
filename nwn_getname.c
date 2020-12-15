@@ -210,16 +210,13 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 	// Note that likely due to precision loss sometime during generation by
 	// Bioware's utility, the results, even after correction, may not exactly
 	// accumulate to 1.000000f, so we give a small bit of leeway.
-#define LOAD_FIX_LTR_FLOATS(x) \
+#define FIX_LTR_FLOATS(x) \
 	{ \
 		bool iscorrupt = true; \
 		for (u32 i = 0; i < l->num_letters; i++) \
 		{ \
 			if (fabs(x[i].cdf_data - 1.0) <= THRESH_MAXALLOWED) \
-			{ \
 				iscorrupt = false; \
-				eprintf(V_FIX,"This table is not corrupt.\n"); \
-			} \
 		} \
 		if (iscorrupt && c.fix) \
 		{ \
@@ -230,7 +227,6 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 			eprintf(V_FIX,"Correcting errors in a probability table...\n"); \
 			for (u32 i = 0; i < l->num_letters; i++) \
 			{ \
-				x[i].cdf_data = fget_f(in); \
 				uncorrected = x[i].cdf_data; \
 				if (x[i].cdf_data) \
 				{ \
@@ -248,10 +244,6 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 			if (fabs(acc - 1.0) > THRESH_MAXALLOWED) \
 				eprintf(V_FIX2,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", acc); \
 		} \
-		else \
-		{ \
-			LOAD_LTR_FLOATS(x); \
-		} \
 	}
 
 	// allocate and fill singles table
@@ -264,8 +256,10 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 		}
 		eprintf(V_LOAD2,"D* successfully allocated the singles cdf table\n");
 		LOAD_LTR_FLOATS(l->singles->start);
-		LOAD_FIX_LTR_FLOATS(l->singles->middle);
-		LOAD_FIX_LTR_FLOATS(l->singles->end);
+		LOAD_LTR_FLOATS(l->singles->middle);
+		FIX_LTR_FLOATS(l->singles->middle);
+		LOAD_LTR_FLOATS(l->singles->end);
+		FIX_LTR_FLOATS(l->singles->end);
 		eprintf(V_LOAD2,"D* successfully filled the singles cdf table\n");
 	}
 	// allocate and fill doubles tables
