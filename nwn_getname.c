@@ -500,7 +500,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 			eprintf(V_ERR,"D* count mismatch for singles->start[%c] (%d) vs doubles[%c]->start_cnt (%d)\n", c.letters[i], l->singles->start[i].count, c.letters[i], l->doubles[i]->start_cnt);
 			if (is_exact_multiple(l->singles->start[i].count, l->doubles[i]->start_cnt))
 			{
-				if (l->singles->start[i].count > l->doubles[i]->start_cnt)
+				if ((l->singles->start[i].count > l->doubles[i]->start_cnt) && l->doubles[i]->start_cnt)
 				{
 					u32 c_factor = l->singles->start[i].count / l->doubles[i]->start_cnt;
 					eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
@@ -515,6 +515,8 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 				else
 					eprintf(V_ERR,"D* cannot fix.\n");
 			}
+			else
+				eprintf(V_ERR,"D* cannot fix due to lack of common factor.\n");
 		}
 	}
 
@@ -528,7 +530,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 				eprintf(V_ERR,"D* count mismatch for doubles[%c]->start[%c] (%d) vs triples[%c][%c]->start_cnt (%d)\n", c.letters[i], c.letters[j], l->doubles[i]->start[j].count, c.letters[i], c.letters[j], l->triples[i][j]->start_cnt);
 				if (is_exact_multiple(l->doubles[i]->start[j].count, l->triples[i][j]->start_cnt))
 				{
-					if (l->doubles[i]->start[j].count > l->triples[i][j]->start_cnt)
+					if ((l->doubles[i]->start[j].count > l->triples[i][j]->start_cnt) && l->triples[i][j]->start_cnt)
 					{
 						u32 c_factor = l->doubles[i]->start[j].count / l->triples[i][j]->start_cnt;
 						eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
@@ -543,6 +545,8 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 					else
 						eprintf(V_ERR,"D* cannot fix.\n");
 				}
+				else
+					eprintf(V_ERR,"D* cannot fix due to lack of common factor.\n");
 			}
 		}
 	}
@@ -572,11 +576,13 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
 		}
 		if ((c.printcdf == 2) || !((p->start[i].cdf_data == 0.0) && (p->middle[i].cdf_data == 0.0) && (p->end[i].cdf_data == 0.0)))
 		{
+			/*
 			printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n",
 				x, y, z,
 				p->start[i].cdf_data, p->start[i].pdf_data,
 				p->middle[i].cdf_data, p->middle[i].pdf_data,
 				p->end[i].cdf_data, p->end[i].pdf_data);
+			*/
 			printf("%c%c%c      |% .5f %5d /%5d |% .5f   %5d /%5d |% .5f %5d /%5d\n",
 				x, y, z,
 				p->start[i].pdf_data, p->start[i].count, p->start_cnt,
@@ -614,7 +620,10 @@ void ltr_dumpstart(ltrfile* l, s_cfg c)
 		{
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
-				
+				for (u32 h = l->triples[k][j]->start[i].count; h > 0; h--)
+				{
+					printf("%c%c%c\n", c.letters[k], c.letters[j], c.letters[i]);
+				}
 			}
 		}
 	}
