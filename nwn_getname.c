@@ -20,6 +20,12 @@ typedef int64_t s64;
 typedef uint64_t u64;
 
 // defines
+// max allowed threshold for absolute error for a match for two floats due to precision loss
+#define THRESH_MAXALLOWED 0.001
+// same for doubles
+#define THRESH_DMAXALLOWED 0.0000000001
+
+// verbosity defines; V_ERR is effectively 'always'
 #define V_ERR   (1)
 #define V_PARAM (c.verbose & (1<<0))
 #define V_GEN   (c.verbose & (1<<1))
@@ -139,6 +145,7 @@ cdf_array* cdf_alloc(u32 count)
 	c->start = f_alloc(count);
 	c->middle = f_alloc(count);
 	c->end = f_alloc(count);
+	c->start_cnt = c->middle_cnt = c->end_cnt = 0;
 	return c;
 }
 
@@ -208,8 +215,11 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 		bool iscorrupt = true; \
 		for (u32 i = 0; i < l->num_letters; i++) \
 		{ \
-			if ((x[i].cdf_data >= 0.9999) && (x[i].cdf_data <= 1.0001)) \
+			if (fabs(x[i].cdf_data - 1.0) <= THRESH_MAXALLOWED) \
+			{ \
 				iscorrupt = false; \
+				eprintf(V_FIX,"This table is not corrupt.\n"); \
+			} \
 		} \
 		if (iscorrupt && c.fix) \
 		{ \
@@ -235,7 +245,7 @@ ltrfile* ltr_load(FILE *in, u32 len, s_cfg c)
 				eprintf(V_FIX2,"ltr: %c, original: %f, corrected: %f, acc: %f, offset: %f\n", c.letters[i], uncorrected, x[i].cdf_data, acc, correction); \
 				prev = uncorrected; \
 			} \
-			if ((acc < 0.9999) || (acc > 1.0001)) \
+			if (fabs(acc - 1.0) > THRESH_MAXALLOWED) \
 				eprintf(V_FIX2,"*W during fixing process, accumulator ended up at a potentially incorrect value of %f!\n", acc); \
 		} \
 		else \
@@ -338,8 +348,6 @@ double get_mean_squared_error(f_array* input, u32 factor, u8 num_letters)
 	return acc/num_letters;
 }
 
-#define THRESH_MAXALLOWED 0.0001
-#define THRESH_FLOATNOISE 0.000001
 u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 {
 	float minimum = 1.1;
@@ -348,7 +356,7 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 		if ((f[i].pdf_data != 0.0) && (f[i].pdf_data < minimum))
 			minimum = f[i].pdf_data;
 	}
-	if ((minimum == 1.1) || (fabs(1.1 - minimum) < THRESH_FLOATNOISE)) // we know for sure this table is empty.
+	if ((minimum == 1.1) || (fabs(1.1 - minimum) < THRESH_MAXALLOWED)) // we know for sure this table is empty.
 		return 0;
 	if (minimum == 1.0) // we know for sure this table has a single 1.0 value in it.
 		return 1;
@@ -361,7 +369,7 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 	eprintf(V_ERR,"D* inverse of minimum probability %f is %f\n", minimum, invmin);
 	// but if this is not an integer, try multiplying it by a bunch of guesses to see if we can get it close to an integer.
 
-	if (fabs(invmin - round(invmin)) > THRESH_FLOATNOISE)
+	if (fabs(invmin - round(invmin)) > THRESH_DMAXALLOWED)
 	{
 		double min_error = 1000000.0;
 		u32 best_guess = 0;
@@ -374,7 +382,7 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 				//eprintf(V_ERR,"D* factor: got a better guess (with an error of %f) of %d\n", this_error, guess);
 				best_guess = guess;
 				min_error = this_error;
-				if (min_error < THRESH_MAXALLOWED)
+				if (min_error < THRESH_DMAXALLOWED)
 					break;
 			}
 		}
@@ -396,8 +404,7 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 			eprintf(V_ERR,"D* got a better guess (with an error of %f) of %d\n", this_error, guess);
 			best_guess = guess;
 			min_error = this_error;
-			//if (((min_error - this_error) <= THRESH_MAXALLOWED) && ((min_error - this_error) >= THRESH_FLOATNOISE))
-			if (min_error < THRESH_FLOATNOISE)
+			if (min_error < THRESH_DMAXALLOWED)
 				break;
 		}
 	}
@@ -422,7 +429,6 @@ void cdf_analyze(cdf_array* p, u8 num_letters, s_cfg c)
 	f_array_populate(p->end, num_letters, p->end_cnt, c);
 }
 
-#define THRESH_FLOATNOISE 0.000001
 bool is_exact_multiple(u32 i, u32 j)
 {
 	if (i == j)
@@ -436,7 +442,7 @@ bool is_exact_multiple(u32 i, u32 j)
 		fg = fj;
 		fl = fi;
 	}
-	if (fabs((fg / fl) - round(fg / fl)) > THRESH_FLOATNOISE)
+	if (fabs((fg / fl) - round(fg / fl)) > THRESH_MAXALLOWED)
 		return false;
 	else
 		return true;
@@ -498,6 +504,52 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		if (l->singles->start[i].count != l->doubles[i]->start_cnt)
 		{
 			eprintf(V_ERR,"D* count mismatch for singles->start[%c] (%d) vs doubles[%c]->start_cnt (%d)\n", c.letters[i], l->singles->start[i].count, c.letters[i], l->doubles[i]->start_cnt);
+			if (is_exact_multiple(l->singles->start[i].count, l->doubles[i]->start_cnt))
+			{
+				if (l->singles->start[i].count > l->doubles[i]->start_cnt)
+				{
+					u32 c_factor = l->singles->start[i].count / l->doubles[i]->start_cnt;
+					eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
+					// iterate through the table and correct the numerators
+					for (u32 j = 0; j < l->num_letters; j++)
+					{
+						l->doubles[i]->start[j].count *= c_factor;
+					}
+					// correct the denominator
+					l->doubles[i]->start_cnt = l->singles->start[i].count;
+				}
+				else
+					eprintf(V_ERR,"D* cannot fix.\n");
+			}
+		}
+	}
+
+	// next heuristic: if the doubles[i]->start[*] count for letter * doesn't equal the denominator for triples[*][i]->start_cnt but is off by some factor, increase the latter to match
+	for (u32 i = 0; i < l->num_letters; i++)
+	{
+		for (u32 j = 0; j < l->num_letters; j++)
+		{
+			if (l->doubles[i]->start[j].count != l->triples[i][j]->start_cnt)
+			{
+				eprintf(V_ERR,"D* count mismatch for doubles[%c]->start[%c] (%d) vs triples[%c][%c]->start_cnt (%d)\n", c.letters[i], c.letters[j], l->doubles[i]->start[j].count, c.letters[i], c.letters[j], l->triples[i][j]->start_cnt);
+				if (is_exact_multiple(l->doubles[i]->start[j].count, l->triples[i][j]->start_cnt))
+				{
+					if (l->doubles[i]->start[j].count > l->triples[i][j]->start_cnt)
+					{
+						u32 c_factor = l->doubles[i]->start[j].count / l->triples[i][j]->start_cnt;
+						eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
+						// iterate through the table and correct the numerators
+						for (u32 k = 0; k < l->num_letters; k++)
+						{
+							l->triples[i][j]->start[k].count *= c_factor;
+						}
+						// correct the denominator
+						l->triples[i][j]->start_cnt = l->doubles[i]->start[j].count;
+					}
+					else
+						eprintf(V_ERR,"D* cannot fix.\n");
+				}
+			}
 		}
 	}
 }
@@ -526,11 +578,11 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
 		}
 		if ((c.printcdf == 2) || !((p->start[i].cdf_data == 0.0) && (p->middle[i].cdf_data == 0.0) && (p->end[i].cdf_data == 0.0)))
 		{
-			/*printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n",
+			printf("%c%c%c      |% .5f    % .5f  |% .5f     % .5f   |% .5f  % .5f\n",
 				x, y, z,
 				p->start[i].cdf_data, p->start[i].pdf_data,
 				p->middle[i].cdf_data, p->middle[i].pdf_data,
-				p->end[i].cdf_data, p->end[i].pdf_data);*/
+				p->end[i].cdf_data, p->end[i].pdf_data);
 			printf("%c%c%c      |% .5f %5d /%5d |% .5f   %5d /%5d |% .5f %5d /%5d\n",
 				x, y, z,
 				p->start[i].pdf_data, p->start[i].count, p->start_cnt,
