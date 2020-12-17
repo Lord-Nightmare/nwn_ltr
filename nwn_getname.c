@@ -79,6 +79,27 @@ typedef struct s_cfg
 	bool dumpstart;
 } s_cfg;
 
+
+/* gcd */
+u32 gcd(u32 a, u32 b)
+{
+	while (b)
+	{
+		a %= b;
+		// clever way to do a swap(a,b) with no other variable/register:
+		a ^= b;
+		b ^= a;
+		a ^= b;
+	}
+	return a;
+}
+
+/* lcm */
+u32 lcm(u32 a, u32 b)
+{
+	return abs(a*b)/gcd(a,b);
+}
+
 /* msrand implementation for consistency */
 #define MSRAND_MAX 0x7fff
 static u32 state = 1;
@@ -550,6 +571,28 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 			}
 		}
 	}
+
+	// future heuristic: if the 'singles->end[n].count' is nonzero, and there is only one name for all m, where 'doubles[m]->end[n].count' is nonzero, propagate the count from 'singles->end[n].count' to 'doubles[m]->end[n].count'. Note that if the .ltr file is internally inconsistent due to hand-editing (the humanm and humanf files are definitely like this) do not attempt to do this, as it can propagate incorrect values!
+	// an interesting caveat of this is the denominator can be propagated this way, which will adjust the numerator and denominator of many other values in the end tables, if successful.
+	for (u32 i = 0; i < l->num_letters; i++)
+	{
+		u32 parents = 0;
+		u32 pidx = 0;
+		if (!(l->singles->end[i].count))
+			continue;
+		for (u32 j = 0; j < l->num_letters; j++)
+		{
+			if (l->doubles[j]->end[i].count)
+			{
+				parents++;
+				pidx = j;
+			}
+		}
+		if (parents == 1)
+		{
+			eprintf(V_ERR,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), this may be a candidate for migration.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_cnt, c.letters[i], l->singles->end[i].count, l->singles->end_cnt);
+		}
+	}
 }
 
 void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
@@ -806,7 +849,6 @@ void usage()
 }
 
 #define MIN_PARAMETERS 1
-
 int main(int argc, char **argv)
 {
 	// defaults
