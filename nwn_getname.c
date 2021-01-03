@@ -106,8 +106,8 @@ static u32 state = 1;
 
 u32 ms_rand()
 {
-	state = ((state*214013) + 2531011) % (1<<31);
-	return (state >> 16)&0x7fff;
+	state = ((state * 214013) + 2531011) % (1 << 31);
+	return (state >> 16) & 0x7fff;
 }
 
 void ms_srand(u32 seed)
@@ -404,14 +404,15 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 		eprintf(V_ERR,"D* factor: guessed error factor is %d, yielding %f\n", best_guess, invmin*best_guess);
 	}
 
-	// using the inverse of the minimum as an initial guess, find the smallest possible
-	// integer that can be multipled against all of the PDF numbers that results in
-	// the results being completely integer with nothing after the decimal point.
+	// find the smallest possible integer that can be multiplied against all of
+	// the PDF numbers that results in the results being completely integer with
+	// nothing after the decimal point.
 	// this is the number of words used to generate this list in the first place.
-	// the guess above should be off by a factor 
+	// note we could be using the inverse of the minimum as an initial guess, but
+	// this occasionally causes problems.
 	double min_error = 1000000.0;
 	u32 best_guess = 0;
-	for (u32 guess = 3; guess < 30000; guess++)
+	for (u32 guess = 3; guess < 30000; guess++) // guess could in theory be initially set to the best_guess variable from the function above this one, instead of 3
 	{
 		double this_error = get_mean_squared_error(f, guess, num_letters);
 		if (this_error < min_error) // we have a better guess!
@@ -444,6 +445,9 @@ void cdf_analyze(cdf_array* p, u8 num_letters, s_cfg c)
 	f_array_populate(p->end, num_letters, p->end_cnt, c);
 }
 
+// figure out whether the two integers are exact multiples
+// this is done by dividing the larger by the smaller and seeing
+// if the resulting number has a fractional portion that is exactly zero
 bool is_exact_multiple(u32 i, u32 j)
 {
 	if (i == j)
