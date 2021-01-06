@@ -1,6 +1,6 @@
 // license:BSD-3-Clause
 // copyright-holders:Jonathan Gevaryahu
-// (C) 2020 Jonathan Gevaryahu AKA Lord Nightmare
+// (C) 2020-2021 Jonathan Gevaryahu AKA Lord Nightmare
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
