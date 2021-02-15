@@ -53,10 +53,14 @@ typedef struct cdf_array
 	f_array* start;
 	f_array* middle;
 	f_array* end;
+	// these are the number of letters with non-zero counts within each of the tables
+	s32 start_buckets;
+	s32 middle_buckets;
+	s32 end_buckets;
 	// these are the total counts for number of letters used to generate the 3 cdf tables, the common denominator for all letters within each array
-	s32 start_cnt;
-	s32 middle_cnt;
-	s32 end_cnt;
+	s32 start_total;
+	s32 middle_total;
+	s32 end_total;
 } cdf_array;
 
 typedef struct ltrfile
@@ -166,7 +170,8 @@ cdf_array* cdf_alloc(u32 count)
 	c->start = f_alloc(count);
 	c->middle = f_alloc(count);
 	c->end = f_alloc(count);
-	c->start_cnt = c->middle_cnt = c->end_cnt = 0;
+	c->start_buckets = c->middle_buckets = c->end_buckets = 0;
+	c->start_total = c->middle_total = c->end_total = 0;
 	return c;
 }
 
@@ -363,6 +368,17 @@ double get_mean_squared_error(f_array* input, u32 factor, u8 num_letters)
 	return acc/num_letters;
 }
 
+u32 f_array_count_buckets(f_array* f, u8 num_letters, s_cfg c)
+{
+	u32 count = 0;
+	for (u32 i = 0; i < num_letters; i++)
+	{
+		if (f[i].pdf_data != 0.0)
+			count++;
+	}
+	return count;
+}
+
 u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 {
 	float minimum = 1.1;
@@ -437,12 +453,15 @@ void f_array_populate(f_array* f, u8 num_letters, u32 count, s_cfg c)
 
 void cdf_analyze(cdf_array* p, u8 num_letters, s_cfg c)
 {
-	p->start_cnt = f_array_analyze(p->start, num_letters, c);
-	f_array_populate(p->start, num_letters, p->start_cnt, c);
-	p->middle_cnt = f_array_analyze(p->middle, num_letters, c);
-	f_array_populate(p->middle, num_letters, p->middle_cnt, c);
-	p->end_cnt = f_array_analyze(p->end, num_letters, c);
-	f_array_populate(p->end, num_letters, p->end_cnt, c);
+	p->start_buckets = f_array_count_buckets(p->start, num_letters, c);
+	p->start_total = f_array_analyze(p->start, num_letters, c);
+	f_array_populate(p->start, num_letters, p->start_total, c);
+	p->middle_buckets = f_array_count_buckets(p->middle, num_letters, c);
+	p->middle_total = f_array_analyze(p->middle, num_letters, c);
+	f_array_populate(p->middle, num_letters, p->middle_total, c);
+	p->end_buckets = f_array_count_buckets(p->end, num_letters, c);
+	p->end_total = f_array_analyze(p->end, num_letters, c);
+	f_array_populate(p->end, num_letters, p->end_total, c);
 }
 
 // figure out whether the two integers are exact multiples
@@ -483,13 +502,13 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 	}
 
 	// the numbers of names should be correct but could be off by some factor, so lets do some heuristics to correct this
-	// first: whichever of the counts for the singles->start_cnt and singles->end_cnt is higher is automatically correct, if they're not the same AND are an even multiple of one another
+	// first: whichever of the counts for the singles->start_total and singles->end_total is higher is automatically correct, if they're not the same AND are an even multiple of one another
 	// some files were hand-edited and hence the two singles tables will not be an exact multiple of one another, and if so, don't try to fix them here!
-	if (is_exact_multiple(l->singles->start_cnt,l->singles->end_cnt))
+	if (is_exact_multiple(l->singles->start_total,l->singles->end_total))
 	{
-		if (l->singles->start_cnt > l->singles->end_cnt) // start was higher
+		if (l->singles->start_total > l->singles->end_total) // start was higher
 		{
-			u32 c_factor = l->singles->start_cnt / l->singles->end_cnt;
+			u32 c_factor = l->singles->start_total / l->singles->end_total;
 			eprintf(V_ERR,"D* fixing singles->end table by factor of %d:\n", c_factor);
 			// iterate through the table and correct the numerators
 			for (u32 i = 0; i < l->num_letters; i++)
@@ -497,11 +516,11 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 				l->singles->end[i].count *= c_factor;
 			}
 			// correct the denominator
-			l->singles->end_cnt = l->singles->start_cnt;
+			l->singles->end_total = l->singles->start_total;
 		}
-		else if (l->singles->start_cnt < l->singles->end_cnt) // end was higher
+		else if (l->singles->start_total < l->singles->end_total) // end was higher
 		{
-			u32 c_factor = l->singles->end_cnt / l->singles->start_cnt;
+			u32 c_factor = l->singles->end_total / l->singles->start_total;
 			eprintf(V_ERR,"D* fixing singles->start table by factor of %d:\n", c_factor);
 			// iterate through the table and correct the numerators
 			for (u32 i = 0; i < l->num_letters; i++)
@@ -509,7 +528,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 				l->singles->start[i].count *= c_factor;
 			}
 			// correct the denominator
-			l->singles->start_cnt = l->singles->end_cnt;
+			l->singles->start_total = l->singles->end_total;
 		}
 	}
 	else
@@ -517,17 +536,17 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		eprintf(V_ERR,"D* cannot equalize start and end tables as they are not an even factor of one another!\n");
 	}
 
-	// next heuristic: if the singles->start[*] count for letter * doesn't equal the denominator for doubles[*]->start_cnt but is off by some factor, increase the latter to match
+	// next heuristic: if the singles->start[*] count for letter * doesn't equal the denominator for doubles[*]->start_total but is off by some factor, increase the latter to match
 	for (u32 i = 0; i < l->num_letters; i++)
 	{
-		if (l->singles->start[i].count != l->doubles[i]->start_cnt)
+		if (l->singles->start[i].count != l->doubles[i]->start_total)
 		{
-			eprintf(V_ERR,"D* count mismatch for singles->start[%c] (%d) vs doubles[%c]->start_cnt (%d)\n", c.letters[i], l->singles->start[i].count, c.letters[i], l->doubles[i]->start_cnt);
-			if (is_exact_multiple(l->singles->start[i].count, l->doubles[i]->start_cnt))
+			eprintf(V_ERR,"D* count mismatch for singles->start[%c] (%d) vs doubles[%c]->start_total (%d)\n", c.letters[i], l->singles->start[i].count, c.letters[i], l->doubles[i]->start_total);
+			if (is_exact_multiple(l->singles->start[i].count, l->doubles[i]->start_total))
 			{
-				if ((l->singles->start[i].count > l->doubles[i]->start_cnt) && l->doubles[i]->start_cnt)
+				if ((l->singles->start[i].count > l->doubles[i]->start_total) && l->doubles[i]->start_total)
 				{
-					u32 c_factor = l->singles->start[i].count / l->doubles[i]->start_cnt;
+					u32 c_factor = l->singles->start[i].count / l->doubles[i]->start_total;
 					eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
 					// iterate through the table and correct the numerators
 					for (u32 j = 0; j < l->num_letters; j++)
@@ -535,7 +554,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 						l->doubles[i]->start[j].count *= c_factor;
 					}
 					// correct the denominator
-					l->doubles[i]->start_cnt = l->singles->start[i].count;
+					l->doubles[i]->start_total = l->singles->start[i].count;
 				}
 				else
 					eprintf(V_ERR,"D* cannot fix.\n");
@@ -545,19 +564,19 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		}
 	}
 
-	// next heuristic: if the doubles[i]->start[*] count for letter * doesn't equal the denominator for triples[*][i]->start_cnt but is off by some factor, increase the latter to match
+	// next heuristic: if the doubles[i]->start[*] count for letter * doesn't equal the denominator for triples[*][i]->start_total but is off by some factor, increase the latter to match
 	for (u32 i = 0; i < l->num_letters; i++)
 	{
 		for (u32 j = 0; j < l->num_letters; j++)
 		{
-			if (l->doubles[i]->start[j].count != l->triples[i][j]->start_cnt)
+			if (l->doubles[i]->start[j].count != l->triples[i][j]->start_total)
 			{
-				eprintf(V_ERR,"D* count mismatch for doubles[%c]->start[%c] (%d) vs triples[%c][%c]->start_cnt (%d)\n", c.letters[i], c.letters[j], l->doubles[i]->start[j].count, c.letters[i], c.letters[j], l->triples[i][j]->start_cnt);
-				if (is_exact_multiple(l->doubles[i]->start[j].count, l->triples[i][j]->start_cnt))
+				eprintf(V_ERR,"D* count mismatch for doubles[%c]->start[%c] (%d) vs triples[%c][%c]->start_total (%d)\n", c.letters[i], c.letters[j], l->doubles[i]->start[j].count, c.letters[i], c.letters[j], l->triples[i][j]->start_total);
+				if (is_exact_multiple(l->doubles[i]->start[j].count, l->triples[i][j]->start_total))
 				{
-					if ((l->doubles[i]->start[j].count > l->triples[i][j]->start_cnt) && l->triples[i][j]->start_cnt)
+					if ((l->doubles[i]->start[j].count > l->triples[i][j]->start_total) && l->triples[i][j]->start_total)
 					{
-						u32 c_factor = l->doubles[i]->start[j].count / l->triples[i][j]->start_cnt;
+						u32 c_factor = l->doubles[i]->start[j].count / l->triples[i][j]->start_total;
 						eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
 						// iterate through the table and correct the numerators
 						for (u32 k = 0; k < l->num_letters; k++)
@@ -565,7 +584,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 							l->triples[i][j]->start[k].count *= c_factor;
 						}
 						// correct the denominator
-						l->triples[i][j]->start_cnt = l->doubles[i]->start[j].count;
+						l->triples[i][j]->start_total = l->doubles[i]->start[j].count;
 					}
 					else
 						eprintf(V_ERR,"D* cannot fix.\n");
@@ -582,19 +601,41 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 	{
 		u32 parents = 0;
 		u32 pidx = 0;
+		// if singles->end[i] is 0, don't bother.
 		if (!(l->singles->end[i].count))
 			continue;
+		// if doubles[j]->end[i] buckets is not exactly 1, don't bother.
+		//if (!(l->doubles[j]->end_buckets == 1))
+		//	continue;
+		// which bucket is 1?
 		for (u32 j = 0; j < l->num_letters; j++)
 		{
 			if (l->doubles[j]->end[i].count)
 			{
+				//eprintf(V_ERR,"D* l->doubles[%c]->end[%c].count is %d\n", c.letters[j], c.letters[i], l->doubles[j]->end[i].count);
 				parents++;
 				pidx = j;
 			}
 		}
 		if (parents == 1)
 		{
-			eprintf(V_ERR,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), this may be a candidate for migration.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_cnt, c.letters[i], l->singles->end[i].count, l->singles->end_cnt);
+			if (l->doubles[pidx]->end[i].count == l->singles->end[i].count)
+				eprintf(V_ERR,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), but the counts already match, so we don't need to do anything here.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_total, c.letters[i], l->singles->end[i].count, l->singles->end_total);
+			else
+			{
+				eprintf(V_ERR,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), this may be a candidate for migration.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_total, c.letters[i], l->singles->end[i].count, l->singles->end_total);
+				// attempt to migrate
+				//write me!
+				if (is_exact_multiple(l->doubles[pidx]->end[i].count,l->singles->end[i].count))
+				{
+					eprintf(V_ERR,"D* factors are compatible, attempting migration.\n");
+					eprintf(V_ERR,"D* ... or would, if this was written yet.\n");
+					for (u32 m = 0; m < l->num_letters; m++)
+					{
+						// not done yet
+					}
+				}
+			}
 		}
 	}
 }
@@ -632,9 +673,9 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
 			*/
 			printf("%c%c%c      |% .5f %5d /%5d |% .5f   %5d /%5d |% .5f %5d /%5d\n",
 				x, y, z,
-				p->start[i].pdf_data, p->start[i].count, p->start_cnt,
-				p->middle[i].pdf_data, p->middle[i].count,p->middle_cnt,
-				p->end[i].pdf_data, p->end[i].count,p->end_cnt);
+				p->start[i].pdf_data, p->start[i].count, p->start_total,
+				p->middle[i].pdf_data, p->middle[i].count,p->middle_total,
+				p->end[i].pdf_data, p->end[i].count,p->end_total);
 		}
 	}
 }
@@ -660,7 +701,8 @@ void ltr_print(ltrfile* l, s_cfg c)
 
 void ltr_dumpstart(ltrfile* l, s_cfg c)
 {
-	printf("D* %d names total:\n", l->singles->start_cnt);
+	if (!c.dumpstart) return;
+	printf("D* %d names total:\n", l->singles->start_total);
 	for (u32 k = 0; k < l->num_letters; k++)
 	{
 		for (u32 j = 0; j < l->num_letters; j++)
@@ -683,7 +725,7 @@ void ltr_dumpstart(ltrfile* l, s_cfg c)
 			{
 				printf("%c", c.letters[i]); // first letter
 				// deeper...
-				u32 doubles_m = (l->singles->start[i].count / l->doubles[i]->start_cnt);
+				u32 doubles_m = (l->singles->start[i].count / l->doubles[i]->start_total);
 				for (u32 j = 0; j < l->num_letters; j++)
 				{
 					if (l->doubles[i]->start[j].pdf_data != 0.0)
@@ -863,7 +905,7 @@ int main(int argc, char **argv)
 		, 100 // generate
 		, time(NULL) // seed
 		, true // fix
-		, V_FIX // verbose
+		, 8 /*8 == V_FIX*/ // verbose
 		, false // dumpstart
 	};
 
