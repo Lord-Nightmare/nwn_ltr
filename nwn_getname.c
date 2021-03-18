@@ -35,6 +35,7 @@ typedef uint64_t u64;
 #define V_LOAD  (c.verbose & (1<<5))
 #define V_LOAD2 (c.verbose & (1<<6))
 #define V_FREE  (c.verbose & (1<<7))
+#define V_MATH  (c.verbose & (1<<8))
 
 // verbose macro
 #define eprintf(v, ...) \
@@ -673,9 +674,9 @@ void cdf_print(cdf_array* p, u8 num_letters, u8 k, u8 j, u8 num, s_cfg c)
 			*/
 			printf("%c%c%c      |% .5f %5d /%5d |% .5f   %5d /%5d |% .5f %5d /%5d\n",
 				x, y, z,
-				p->start[i].pdf_data, p->start[i].count, p->start_total,
-				p->middle[i].pdf_data, p->middle[i].count,p->middle_total,
-				p->end[i].pdf_data, p->end[i].count,p->end_total);
+				p->start[i].cdf_data, p->start[i].count, p->start_total,
+				p->middle[i].cdf_data, p->middle[i].count,p->middle_total,
+				p->end[i].cdf_data, p->end[i].count,p->end_total);
 		}
 	}
 }
