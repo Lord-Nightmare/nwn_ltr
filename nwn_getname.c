@@ -1,6 +1,6 @@
 // license:BSD-3-Clause
 // copyright-holders:Jonathan Gevaryahu
-// (C) 2020-2021 Jonathan Gevaryahu AKA Lord Nightmare
+// (C) 2020-2022 Jonathan Gevaryahu AKA Lord Nightmare
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -78,6 +78,7 @@ typedef struct s_cfg
 	const char* const letters;
 	int printcdf;
 	u32 generate;
+	u32 genmaxlen;
 	u32 seed;
 	bool fix;
 	u32 verbose;
@@ -821,7 +822,7 @@ void ltr_generate(ltrfile* l, s_cfg c) // generate exactly one name.
 		rng = nrand();
 
 		// roll to see whether the name ends here; names can't be longer than 12+1 letters and should be biased toward shorter names
-		if ( (ms_rand() % 12) <= index ) // did our name end?
+		if ( (ms_rand() % c.genmaxlen) <= index ) // did our name end?
 		{
 			for (k = 0; k < l->num_letters; k++)
 			{
@@ -881,6 +882,7 @@ void usage()
 	printf("-p\t: print the non-zero rows of the ltr CDF tables\n");
 	printf("-pp\t: print all the rows of the ltr CDF tables\n");
 	printf("-g #\t: generate # names (Default: 100)\n");
+	printf("-l #\t: maximum letters in a name (Default: 12)\n");
 	printf("-s #\t: use # as the seed (Default: random)\n");
 	printf("-f\t: if the ltr file has corrupt singles tables, do not fix them\n");
 	printf("-d\t: dump the starting letters of every possible name\n");
@@ -905,6 +907,7 @@ int main(int argc, char **argv)
 		"abcdefghijklmnopqrstuvwxyz'-" // letters
 		, 0 // printcdf
 		, 100 // generate
+		, 12 // genmaxlen
 		, time(NULL) // seed
 		, true // fix
 		, 8 /*8 == V_FIX*/ // verbose
@@ -932,6 +935,12 @@ int main(int argc, char **argv)
 				paramidx++;
 				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -g parameter!\n"); usage(); exit(1); }
 				if (!sscanf(argv[paramidx], "%d", &c.generate)) { eprintf(V_ERR,"E* Unable to parse argument for -g parameter!\n"); usage(); exit(1); }
+				paramidx++;
+				break;
+			case 'l':
+				paramidx++;
+				if (paramidx == (argc-1)) { eprintf(V_ERR,"E* Too few arguments for -l parameter!\n"); usage(); exit(1); }
+				if (!sscanf(argv[paramidx], "%d", &c.genmaxlen)) { eprintf(V_ERR,"E* Unable to parse argument for -l parameter!\n"); usage(); exit(1); }
 				paramidx++;
 				break;
 			case 's':
