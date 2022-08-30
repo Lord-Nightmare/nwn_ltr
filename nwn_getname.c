@@ -398,7 +398,7 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 
 	// based on this, we can take an educated first guess
 	double invmin = 1.0 / minimum;
-	eprintf(V_ERR,"D* inverse of minimum probability %f is %f\n", minimum, invmin);
+	eprintf(V_MATH,"D* inverse of minimum probability %f is %f\n", minimum, invmin);
 	// but if this is not an integer, try multiplying it by a bunch of guesses to see if we can get it close to an integer.
 
 	if (fabs(invmin - round(invmin)) > THRESH_DMAXALLOWED)
@@ -408,17 +408,17 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 		for (u32 guess = 2; guess < 100; guess++)
 		{
 			double this_error = fabs((invmin*guess) - round(invmin*guess));
-			//eprintf(V_ERR,"D* factor: testing guess of %d (error of %f), min error is %f\n", guess, this_error, min_error);
+			//eprintf(V_MATH,"D* factor: testing guess of %d (error of %f), min error is %f\n", guess, this_error, min_error);
 			if (this_error < min_error)
 			{
-				//eprintf(V_ERR,"D* factor: got a better guess (with an error of %f) of %d\n", this_error, guess);
+				//eprintf(V_MATH,"D* factor: got a better guess (with an error of %f) of %d\n", this_error, guess);
 				best_guess = guess;
 				min_error = this_error;
 				if (min_error < THRESH_DMAXALLOWED)
 					break;
 			}
 		}
-		eprintf(V_ERR,"D* factor: guessed error factor is %d, yielding %f\n", best_guess, invmin*best_guess);
+		eprintf(V_MATH,"D* factor: guessed error factor is %d, yielding %f\n", best_guess, invmin*best_guess);
 	}
 
 	// find the smallest possible integer that can be multiplied against all of
@@ -434,14 +434,14 @@ u32 f_array_analyze(f_array* f, u8 num_letters, s_cfg c)
 		double this_error = get_mean_squared_error(f, guess, num_letters);
 		if (this_error < min_error) // we have a better guess!
 		{
-			eprintf(V_ERR,"D* got a better guess (with an error of %f) of %d\n", this_error, guess);
+			eprintf(V_MATH,"D* got a better guess (with an error of %f) of %d\n", this_error, guess);
 			best_guess = guess;
 			min_error = this_error;
 			if (min_error < THRESH_DMAXALLOWED)
 				break;
 		}
 	}
-	//eprintf(V_ERR,"D* best guess (with an error of %f) was %d\n", min_error, best_guess);
+	//eprintf(V_MATH,"D* best guess (with an error of %f) was %d\n", min_error, best_guess);
 	return best_guess;
 }
 
@@ -510,7 +510,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		if (l->singles->start_total > l->singles->end_total) // start was higher
 		{
 			u32 c_factor = l->singles->start_total / l->singles->end_total;
-			eprintf(V_ERR,"D* fixing singles->end table by factor of %d:\n", c_factor);
+			eprintf(V_MATH,"D* fixing singles->end table by factor of %d:\n", c_factor);
 			// iterate through the table and correct the numerators
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
@@ -522,7 +522,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		else if (l->singles->start_total < l->singles->end_total) // end was higher
 		{
 			u32 c_factor = l->singles->end_total / l->singles->start_total;
-			eprintf(V_ERR,"D* fixing singles->start table by factor of %d:\n", c_factor);
+			eprintf(V_MATH,"D* fixing singles->start table by factor of %d:\n", c_factor);
 			// iterate through the table and correct the numerators
 			for (u32 i = 0; i < l->num_letters; i++)
 			{
@@ -534,7 +534,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 	}
 	else
 	{
-		eprintf(V_ERR,"D* cannot equalize start and end tables as they are not an even factor of one another!\n");
+		eprintf(V_MATH,"D* cannot equalize start and end tables as they are not an even factor of one another!\n");
 	}
 
 	// next heuristic: if the singles->start[*] count for letter * doesn't equal the denominator for doubles[*]->start_total but is off by some factor, increase the latter to match
@@ -542,13 +542,13 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 	{
 		if (l->singles->start[i].count != l->doubles[i]->start_total)
 		{
-			eprintf(V_ERR,"D* count mismatch for singles->start[%c] (%d) vs doubles[%c]->start_total (%d)\n", c.letters[i], l->singles->start[i].count, c.letters[i], l->doubles[i]->start_total);
+			eprintf(V_MATH,"D* count mismatch for singles->start[%c] (%d) vs doubles[%c]->start_total (%d)\n", c.letters[i], l->singles->start[i].count, c.letters[i], l->doubles[i]->start_total);
 			if (is_exact_multiple(l->singles->start[i].count, l->doubles[i]->start_total))
 			{
 				if ((l->singles->start[i].count > l->doubles[i]->start_total) && l->doubles[i]->start_total)
 				{
 					u32 c_factor = l->singles->start[i].count / l->doubles[i]->start_total;
-					eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
+					eprintf(V_MATH,"D* fixing table by factor of %d:\n", c_factor);
 					// iterate through the table and correct the numerators
 					for (u32 j = 0; j < l->num_letters; j++)
 					{
@@ -558,10 +558,10 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 					l->doubles[i]->start_total = l->singles->start[i].count;
 				}
 				else
-					eprintf(V_ERR,"D* cannot fix.\n");
+					eprintf(V_MATH,"D* cannot fix.\n");
 			}
 			else
-				eprintf(V_ERR,"D* cannot fix due to lack of common factor.\n");
+				eprintf(V_MATH,"D* cannot fix due to lack of common factor.\n");
 		}
 	}
 
@@ -572,13 +572,13 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		{
 			if (l->doubles[i]->start[j].count != l->triples[i][j]->start_total)
 			{
-				eprintf(V_ERR,"D* count mismatch for doubles[%c]->start[%c] (%d) vs triples[%c][%c]->start_total (%d)\n", c.letters[i], c.letters[j], l->doubles[i]->start[j].count, c.letters[i], c.letters[j], l->triples[i][j]->start_total);
+				eprintf(V_MATH,"D* count mismatch for doubles[%c]->start[%c] (%d) vs triples[%c][%c]->start_total (%d)\n", c.letters[i], c.letters[j], l->doubles[i]->start[j].count, c.letters[i], c.letters[j], l->triples[i][j]->start_total);
 				if (is_exact_multiple(l->doubles[i]->start[j].count, l->triples[i][j]->start_total))
 				{
 					if ((l->doubles[i]->start[j].count > l->triples[i][j]->start_total) && l->triples[i][j]->start_total)
 					{
 						u32 c_factor = l->doubles[i]->start[j].count / l->triples[i][j]->start_total;
-						eprintf(V_ERR,"D* fixing table by factor of %d:\n", c_factor);
+						eprintf(V_MATH,"D* fixing table by factor of %d:\n", c_factor);
 						// iterate through the table and correct the numerators
 						for (u32 k = 0; k < l->num_letters; k++)
 						{
@@ -588,10 +588,10 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 						l->triples[i][j]->start_total = l->doubles[i]->start[j].count;
 					}
 					else
-						eprintf(V_ERR,"D* cannot fix.\n");
+						eprintf(V_MATH,"D* cannot fix.\n");
 				}
 				else
-					eprintf(V_ERR,"D* cannot fix due to lack of common factor.\n");
+					eprintf(V_MATH,"D* cannot fix due to lack of common factor.\n");
 			}
 		}
 	}
@@ -613,7 +613,7 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		{
 			if (l->doubles[j]->end[i].count)
 			{
-				//eprintf(V_ERR,"D* l->doubles[%c]->end[%c].count is %d\n", c.letters[j], c.letters[i], l->doubles[j]->end[i].count);
+				//eprintf(V_MATH,"D* l->doubles[%c]->end[%c].count is %d\n", c.letters[j], c.letters[i], l->doubles[j]->end[i].count);
 				parents++;
 				pidx = j;
 			}
@@ -621,16 +621,16 @@ void ltr_analyze(ltrfile* l, s_cfg c)
 		if (parents == 1)
 		{
 			if (l->doubles[pidx]->end[i].count == l->singles->end[i].count)
-				eprintf(V_ERR,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), but the counts already match, so we don't need to do anything here.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_total, c.letters[i], l->singles->end[i].count, l->singles->end_total);
+				eprintf(V_MATH,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), but the counts already match, so we don't need to do anything here.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_total, c.letters[i], l->singles->end[i].count, l->singles->end_total);
 			else
 			{
-				eprintf(V_ERR,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), this may be a candidate for migration.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_total, c.letters[i], l->singles->end[i].count, l->singles->end_total);
+				eprintf(V_MATH,"D* found exactly one parent (doubles[%c]->end[%c], count of %d out of %d) of singles->end[%c] (count of %d out of %d), this may be a candidate for migration.\n", c.letters[pidx], c.letters[i], l->doubles[pidx]->end[i].count, l->doubles[pidx]->end_total, c.letters[i], l->singles->end[i].count, l->singles->end_total);
 				// attempt to migrate
 				//write me!
 				if (is_exact_multiple(l->doubles[pidx]->end[i].count,l->singles->end[i].count))
 				{
-					eprintf(V_ERR,"D* factors are compatible, attempting migration.\n");
-					eprintf(V_ERR,"D* ... or would, if this was written yet.\n");
+					eprintf(V_MATH,"D* factors are compatible, attempting migration.\n");
+					eprintf(V_MATH,"D* ... or would, if this was written yet.\n");
 					for (u32 m = 0; m < l->num_letters; m++)
 					{
 						// not done yet
@@ -893,6 +893,7 @@ void usage()
 	printf("\tLtr Load     32\n");
 	printf("\t  Details    64\n");
 	printf("\tLtr Free     128\n");
+	printf("\tProbability  256\n");
 }
 
 #define MIN_PARAMETERS 1
